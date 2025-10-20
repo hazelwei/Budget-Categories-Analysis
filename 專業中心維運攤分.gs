@@ -2,10 +2,10 @@
  * 依據指定條件整理「2.2_事業維運費用_$」的資料，
  * 將每月合計拆分為 9.25% / 90.75%，並寫入「維運攤分」分頁。
  */
-function onOpen() {
-  SpreadsheetApp.getUi()
+function addMaintenanceMenu_(ui) {
+  (ui || SpreadsheetApp.getUi())
     .createMenu('維運攤分')
-    .addItem('執行攤分', 'consolidateHeadcount')
+    .addItem('執行攤分', 'distributeMaintenanceCosts')
     .addToUi();
 }
 
@@ -112,22 +112,29 @@ function distributeMaintenanceCosts() {
   const targetHeaders = targetValues[0];
   const targetHeaderMap = buildHeaderMap_(targetHeaders);
 
-  removeExistingAllocations_(targetSheet, SPLIT_CONFIG[0].fields, targetHeaderMap);
+  removeExistingAllocations_(targetSheet, null, targetHeaderMap);
 
-  const outputRows = SPLIT_CONFIG.map(function (config) {
+  const shares = SPLIT_CONFIG.map(function (config) {
+    return config.share;
+  });
+  const monthlyAllocations = monthlyTotals.map(function (monthInfo) {
+    return allocateByShares_(monthInfo.total, shares);
+  });
+
+  const outputRows = SPLIT_CONFIG.map(function (config, configIndex) {
     const row = new Array(targetHeaders.length).fill('');
     Object.keys(config.fields).forEach(function (key) {
       if (key in targetHeaderMap) {
         row[targetHeaderMap[key]] = config.fields[key];
       }
     });
-    monthlyTotals.forEach(function (monthInfo) {
+    monthlyTotals.forEach(function (monthInfo, monthIndex) {
       if (!(monthInfo.header in targetHeaderMap)) {
         Logger.log('目的分頁缺少欄位：' + monthInfo.header + '，略過該欄位。');
         return;
       }
       const idx = targetHeaderMap[monthInfo.header];
-      row[idx] = roundAmount_(monthInfo.total * config.share);
+      row[idx] = monthlyAllocations[monthIndex][configIndex];
     });
     return row;
   });
@@ -153,8 +160,8 @@ function matchesCriteria_(row, headerMap, criteria) {
     if (!(key in headerMap)) {
       throw new Error('來源表頭缺少欄位：' + key);
     }
-    const value = row[headerMap[key]];
-    return value === criteria[key];
+    const value = normalizeString_(row[headerMap[key]]);
+    return value === normalizeString_(criteria[key]);
   });
 }
 
@@ -178,7 +185,8 @@ function detectMonthColumns_(headers, rows, reservedHeaders) {
 }
 
 function isMonthlyHeader_(header) {
-  const MONTH_PATTERN = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Q[1-4]|月|20\d{2})/i;
+  const MONTH_PATTERN =
+    /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Q[1-4]|月|20\d{2}|總計|合計|總額|Total|Sum)/i;
   return MONTH_PATTERN.test(header);
 }
 
@@ -195,6 +203,22 @@ function toNumber_(value) {
 
 function roundAmount_(value) {
   return Math.round(value * 100) / 100;
+}
+
+function allocateByShares_(total, shares) {
+  var allocations = [];
+  var remaining = total;
+  for (var i = 0; i < shares.length; i++) {
+    var amount;
+    if (i === shares.length - 1) {
+      amount = roundAmount_(remaining);
+    } else {
+      amount = roundAmount_(total * shares[i]);
+      remaining = roundAmount_(remaining - amount);
+    }
+    allocations.push(amount);
+  }
+  return allocations;
 }
 
 function collectReservedHeaders_(criteria, splitConfig) {
@@ -245,6 +269,19 @@ function rowMatches_(row, headerMap, fields) {
     if (!(key in headerMap)) {
       return false;
     }
-    return row[headerMap[key]] === fields[key];
+    return normalizeString_(row[headerMap[key]]) === normalizeString_(fields[key]);
   });
+}
+
+function normalizeString_(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  return String(value).trim();
 }

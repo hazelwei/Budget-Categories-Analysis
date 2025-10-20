@@ -1,5 +1,5 @@
-function onOpen() {
-  SpreadsheetApp.getUi()
+function addHeadcountMenu_(ui) {
+  (ui || SpreadsheetApp.getUi())
     .createMenu('人力配置自動匯總')
     .addItem('執行匯總', 'consolidateHeadcount')
     .addToUi();
