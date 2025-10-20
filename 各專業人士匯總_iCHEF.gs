@@ -30,7 +30,8 @@ function syncPersonnelData(groupKey = 'ICHEF') {
   const targetSheet = SpreadsheetApp.getActive().getSheetByName(group.targetSheetName);
   if (!targetSheet) throw new Error(`找不到目標分頁：${group.targetSheetName}`);
 
-  const aggregatedValues = [];
+  let headerRow = null;
+  const dataRows = [];
 
   group.sources.forEach((source, index) => {
     const sourceSheet = SpreadsheetApp.openById(source.id).getSheetByName(SOURCE_SHEET_NAME);
@@ -44,20 +45,29 @@ function syncPersonnelData(groupKey = 'ICHEF') {
     const values = sourceSheet.getRange(1, 1, lastRow, SOURCE_COLUMNS).getValues();
     if (values.length === 0) return;
 
-    if (aggregatedValues.length === 0) {
-      aggregatedValues.push(...values);
-    } else {
-      aggregatedValues.push(...values.slice(1)); // 後續來源避開標題列
+    const [currentHeader, ...currentData] = values;
+
+    if (!headerRow) {
+      headerRow = currentHeader;
     }
+
+    if (!headerRow) {
+      headerRow = currentHeader;
+    }
+
+    const rowsToAppend = headerRow ? currentData : values;
+    dataRows.push(...rowsToAppend);
   });
 
   targetSheet.getRange('A:V').clearContent();
 
-  if (aggregatedValues.length === 0) return;
+  if (!headerRow) return;
+
+  const output = [headerRow, ...dataRows];
 
   targetSheet
-    .getRange(1, 1, aggregatedValues.length, SOURCE_COLUMNS)
-    .setValues(aggregatedValues);
+    .getRange(1, 1, output.length, SOURCE_COLUMNS)
+    .setValues(output);
 }
 
 function consolidateHeadcount() {
