@@ -24,7 +24,7 @@ function distributeMaintenanceCosts() {
 
   const ALLOWED_COST_TYPES = ['非人事費用', '人事費用'];
 
-  const SPLIT_CONFIG = [
+  const SPLIT_CONFIG_TEMPLATE = [
     {
       share: 0.0925,
       fields: {
@@ -33,7 +33,6 @@ function distributeMaintenanceCosts() {
         'Si 編號': 'Maintenance',
         'TA 編號': 'Baseline',
         '價值鏈專案預算代號': 'NA',
-        '費用單位': '執行長室 : 客戶價值中心 : 客戶價值中心',
         '費用類型': '非人事費用',
         '費用項目': '維運費用分攤',
       },
@@ -46,12 +45,20 @@ function distributeMaintenanceCosts() {
         'Si 編號': 'Maintenance',
         'TA 編號': 'Baseline',
         '價值鏈專案預算代號': 'NA',
-        '費用單位': '執行長室 : 客戶價值中心 : 客戶價值中心',
         '費用類型': '非人事費用',
         '費用項目': '維運費用分攤',
       },
     },
   ];
+
+  const COST_UNIT_MAPPING = {
+    '執行長室 : 管理中心': '執行長室 : 管理中心 : 管理中心',
+    '執行長室 : 財務中心': '執行長室 : 財務中心 : 財務中心',
+    '執行長室 : 研發中心': '執行長室 : 研發中心 : 研發中心',
+    '執行長室 : 行銷營運中心': '執行長室 : 行銷營運中心 : 行銷營運中心',
+    '執行長室 : 客戶價值中心': '執行長室 : 客戶價值中心 : 客戶價值中心',
+    '執行長室 : 策略資料中心': '執行長室 : 策略資料中心 : 策略資料中心',
+  };
 
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sourceSheet = ss.getSheetByName(SOURCE_SHEET_NAME);
@@ -78,7 +85,7 @@ function distributeMaintenanceCosts() {
 
   const sourceHeaders = sourceValues[0];
   const sourceHeaderMap = buildHeaderMap_(sourceHeaders);
-  assertHeadersPresent_(sourceHeaderMap, ['費用類型'], '來源分頁');
+  assertHeadersPresent_(sourceHeaderMap, ['費用類型', '費用單位'], '來源分頁');
   const baseRows = sourceValues.slice(1).filter(function (row) {
     return matchesCriteria_(row, sourceHeaderMap, BASE_FILTER);
   });
@@ -95,7 +102,10 @@ function distributeMaintenanceCosts() {
     return;
   }
 
-  const reservedHeaderNames = collectReservedHeaders_(BASE_FILTER, SPLIT_CONFIG);
+  const targetCostUnit = determineTargetCostUnit_(baseRows, sourceHeaderMap, COST_UNIT_MAPPING);
+  const splitConfig = applyCostUnitToSplitConfig_(SPLIT_CONFIG_TEMPLATE, targetCostUnit);
+
+  const reservedHeaderNames = collectReservedHeaders_(BASE_FILTER, splitConfig);
   const monthColumns = detectMonthColumns_(sourceHeaders, baseRows, reservedHeaderNames);
   if (monthColumns.length === 0) {
     throw new Error('找不到任何看起來像月份的欄位，請確認表頭設定。');
@@ -136,10 +146,10 @@ function distributeMaintenanceCosts() {
     sourceValues.slice(1),
     sourceHeaderMap,
     monthColumns,
-    SPLIT_CONFIG
+    splitConfig
   );
 
-  const shares = SPLIT_CONFIG.map(function (config) {
+  const shares = splitConfig.map(function (config) {
     return config.share;
   });
 
@@ -157,7 +167,7 @@ function distributeMaintenanceCosts() {
           });
         });
 
-    SPLIT_CONFIG.forEach(function (config, configIndex) {
+    splitConfig.forEach(function (config, configIndex) {
       const row = new Array(targetHeaders.length).fill('');
       Object.keys(config.fields).forEach(function (key) {
         if (key in targetHeaderMap) {
@@ -290,6 +300,59 @@ function collectReservedHeaders_(criteria, splitConfig) {
   return reserved;
 }
 
+function applyCostUnitToSplitConfig_(template, costUnit) {
+  return template.map(function (config) {
+    return {
+      share: config.share,
+      fields: Object.assign({}, config.fields, {
+        '費用單位': costUnit,
+      }),
+    };
+  });
+}
+
+function determineTargetCostUnit_(rows, headerMap, costUnitMap) {
+  const index = headerMap['費用單位'];
+  const prefixes = new Set();
+  rows.forEach(function (row) {
+    const prefix = extractCostUnitPrefix_(row[index]);
+    if (prefix) {
+      prefixes.add(prefix);
+    }
+  });
+  if (prefixes.size === 0) {
+    throw new Error('找不到可辨識的維運費用單位分類，請確認來源資料。');
+  }
+  if (prefixes.size > 1) {
+    throw new Error('來源資料包含多個維運費用單位分類，請確認：' + Array.from(prefixes).join(', '));
+  }
+  const prefix = prefixes.values().next().value;
+  const mapped = costUnitMap[prefix];
+  if (!mapped) {
+    throw new Error('無法辨識的維運費用單位分類：' + prefix);
+  }
+  return mapped;
+}
+
+function extractCostUnitPrefix_(value) {
+  const normalized = normalizeString_(value);
+  if (!normalized) {
+    return '';
+  }
+  const segments = normalized
+    .split(/[:：]/)
+    .map(function (part) {
+      return part.trim();
+    })
+    .filter(function (part) {
+      return part !== '';
+    });
+  if (segments.length < 2) {
+    return '';
+  }
+  return segments[0] + ' : ' + segments[1];
+}
+
 function removeExistingAllocations_(sheet, referenceFields, headerMap) {
   const dataRange = sheet.getDataRange();
   if (dataRange.getNumRows() < 2) {
@@ -368,4 +431,33 @@ function collectDirectMaintenancePersonnelTotals_(rows, headerMap, monthColumns,
     accumulateMonthlyTotals_(totalsMap, comboKey, monthColumns, row);
   });
   return totalsMap;
+}
+
+function accumulateMonthlyTotals_(bucketMap, unitKey, monthColumns, row) {
+  if (!bucketMap.has(unitKey)) {
+    bucketMap.set(
+      unitKey,
+      monthColumns.map(function () {
+        return 0;
+      })
+    );
+  }
+  const totals = bucketMap.get(unitKey);
+  monthColumns.forEach(function (monthCol, index) {
+    totals[index] += toNumber_(row[monthCol.index]);
+  });
+}
+
+function hasNonZero_(values) {
+  return values.some(function (value) {
+    return Math.abs(value) > 0;
+  });
+}
+
+function assertHeadersPresent_(headerMap, headerNames, contextLabel) {
+  headerNames.forEach(function (name) {
+    if (!(name in headerMap)) {
+      throw new Error((contextLabel || '工作表') + '缺少必要欄位：' + name);
+    }
+  });
 }
