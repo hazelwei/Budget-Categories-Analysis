@@ -7,13 +7,10 @@ function onOpen() {
   if (typeof addHeadcountMenu_ === 'function') {
     addHeadcountMenu_(ui);
   }
-  if (typeof addPersonnelSyncMenus_ === 'function') {
-    addPersonnelSyncMenus_(ui);
-  }
-  if (typeof addTaResourceMenus_ === 'function') {
-    addTaResourceMenus_(ui);
-  }
   if (typeof addMaintenanceMenu_ === 'function') {
     addMaintenanceMenu_(ui);
+  }
+  if (typeof addGroupAllocationMenu_ === 'function') {
+    addGroupAllocationMenu_(ui);
   }
 }

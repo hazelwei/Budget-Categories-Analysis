@@ -78,8 +78,8 @@ function consolidateHeadcountQLR() {
   syncPersonnelData('QLR');
 }
 
-function onOpen() {
-  SpreadsheetApp.getUi()
+function addPersonnelSyncMenus_(ui) {
+  (ui || SpreadsheetApp.getUi())
     .createMenu('匯總人事')
     .addItem('匯總 iCHEF', 'consolidateHeadcount')
     .addItem('匯總 QLR', 'consolidateHeadcountQLR')

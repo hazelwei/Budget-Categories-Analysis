@@ -1,5 +1,5 @@
-function onOpen() {
-  SpreadsheetApp.getUi()
+function addTaResourceMenus_(ui) {
+  (ui || SpreadsheetApp.getUi())
     .createMenu('各專業 TA 專案資源')
     .addItem('人力資源', 'consolidateHeadcount')
     .addItem('所有資源', 'consolidateAllResources')
