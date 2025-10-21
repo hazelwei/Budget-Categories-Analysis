@@ -12,6 +12,7 @@ function consolidateHeadcount() {
 
 function consolidateAllResources() {
   const SOURCE_SHEET_PATTERN = '1.2_各事業 TA 預算規劃_$';
+    // TODO: 使用前請更新對應的 SPREADSHEET_ID。
   const TARGET_SPREADSHEET_ID = '1Lg520_67UD8MtVwhK1hJgybh377knWyz8iQPjwKDLbM';
   const TARGET_SHEET_NAME = '2.6_TA 專案所需資源（匯總）';
 
@@ -28,6 +29,7 @@ function consolidateAllResources() {
   ];
 
   const filters = {
+    // TODO: 使用前請更新對應的 subsidiary,businessUnit。
     subsidiary: 'QLR',
     businessUnit: 'OMO',
     siExclusions: ['Maintenance', 'Corporation'],
@@ -55,6 +57,7 @@ function consolidateAllResources() {
 
 function syncTaResourceSheets() {
   const SOURCE_SHEET_NAME = '事業人力資源配置匯總表(自動彙整)';
+    // TODO: 使用前請更新對應的 SPREADSHEET_ID。
   const TARGET_SPREADSHEET_ID = '1Lg520_67UD8MtVwhK1hJgybh377knWyz8iQPjwKDLbM';
   const TARGET_SHEET_NAME = '2.5_TA 專案所需資源（人力）';
 
@@ -70,6 +73,7 @@ function syncTaResourceSheets() {
   ];
 
   const filters = {
+    // TODO: 使用前請更新對應的 subsidiary,businessUnit。
     subsidiary: 'QLR',
     businessUnit: 'OMO',
     siExclusions: ['Maintenance', 'Corporation'],

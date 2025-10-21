@@ -11,10 +11,11 @@ function onInstall() {
 
 function consolidateHeadcount() {
   const sourceSheetNames = [
-    '1.1_各事業 TA 預算規劃_策略資料中心_人力時間配置',
-    '3.1_集團共用資源_策略資料中心_人力時間配置'
+    '1.1_各事業 TA 預算規劃_人力時間配置',
+    '2.1_事業維運費用_人力時間配置',
+    '3.1_集團共用資源_人力時間配置'
   ];
-  const targetSheetName = '事業人力資源配置匯總表(中心主管填)';
+  const targetSheetName = '事業人力資源配置匯總表(自動彙整)';
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const targetSheet = ss.getSheetByName(targetSheetName);
   if (!targetSheet) throw new Error(`找不到目標分頁：${targetSheetName}`);
