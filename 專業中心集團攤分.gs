@@ -9,6 +9,44 @@ function addGroupAllocationMenu_(ui) {
     .addToUi();
 }
 
+const GROUP_ALLOCATION_CONFIGS_ = [
+  {
+    unitSet: new Set([
+      '執行長室',
+      '執行長室 : 財務中心',
+      '執行長室 : 稽核部',
+      '執行長室 : 管理中心',
+      '執行長室 : 策略資料中心',
+    ]),
+    splitConfig: [
+      { share: 0.0884, fields: { '子公司': 'TW', '事業單位': 'OMO' } },
+      { share: 0.8665, fields: { '子公司': 'TW', '事業單位': 'POS' } },
+      { share: 0.0451, fields: { '子公司': 'QLR', '事業單位': 'OMO' } },
+    ],
+  },
+  {
+    unitSet: new Set([
+      '執行長室 : 客戶價值中心',
+      '執行長室 : 研發中心',
+      '執行長室 : 行銷營運中心',
+    ]),
+    splitConfig: [
+      { share: 0.0925, fields: { '子公司': 'TW', '事業單位': 'OMO' } },
+      { share: 0.9075, fields: { '子公司': 'TW', '事業單位': 'POS' } },
+    ],
+  },
+];
+
+const GROUP_ALLOCATION_VALID_UNITS_ = (function () {
+  var result = new Set();
+  GROUP_ALLOCATION_CONFIGS_.forEach(function (group) {
+    group.unitSet.forEach(function (unit) {
+      result.add(unit);
+    });
+  });
+  return result;
+})();
+
 function distributeGroupAllocations() {
   const SPREADSHEET_ID = '1mYeC6DpUqFvnce9leb-098wSYCGqfOR5_HGDM2bcbEc';
   const SOURCE_SHEET_NAME = '3.2_集團共用資源_$';
@@ -22,20 +60,7 @@ function distributeGroupAllocations() {
   };
 
   const VALID_PROJECT_CODES = new Set(['NA', '']);
-  const VALID_UNITS = new Set([
-    '執行長室',
-    '執行長室 : 財務中心',
-    '執行長室 : 稽核部',
-    '執行長室 : 管理中心',
-    '執行長室 : 策略資料中心',
-    '執行長室 : 客戶價值中心',
-  ]);
-
-  const SPLIT_CONFIG = [
-    { share: 0.0884, fields: { '子公司': 'TW', '事業單位': 'OMO' } },
-    { share: 0.8665, fields: { '子公司': 'TW', '事業單位': 'POS' } },
-    { share: 0.0451, fields: { '子公司': 'QLR', '事業單位': 'OMO' } },
-  ];
+  const VALID_UNITS = GROUP_ALLOCATION_VALID_UNITS_;
 
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sourceSheet = ss.getSheetByName(SOURCE_SHEET_NAME);
@@ -149,7 +174,11 @@ function distributeGroupAllocations() {
   Object.keys(costTypeBuckets).forEach(function (costType) {
     const unitMap = costTypeBuckets[costType];
     unitMap.forEach(function (monthlyTotals, unitKey) {
-      const hasDirectContribution = SPLIT_CONFIG.some(function (config) {
+      const splitConfig = getSplitConfigForUnit_(unitKey);
+      if (!splitConfig || splitConfig.length === 0) {
+        return;
+      }
+      const hasDirectContribution = splitConfig.some(function (config) {
         const directKey = config.fields['子公司'] + '|' + config.fields['事業單位'] + '|' + unitKey;
         return directPersonnelTotals.has(directKey);
       });
@@ -157,12 +186,12 @@ function distributeGroupAllocations() {
         return;
       }
       const allocations = monthlyTotals.map(function (total) {
-        return allocateByShares_(total, SPLIT_CONFIG.map(function (config) {
+        return allocateByShares_(total, splitConfig.map(function (config) {
           return config.share;
         }));
       });
 
-      SPLIT_CONFIG.forEach(function (config, index) {
+      splitConfig.forEach(function (config, index) {
         const row = new Array(targetHeaders.length).fill('');
         row[targetHeaderMap['子公司']] = config.fields['子公司'];
         row[targetHeaderMap['事業單位']] = config.fields['事業單位'];
@@ -172,7 +201,7 @@ function distributeGroupAllocations() {
           row[targetHeaderMap['價值鏈專案預算代號']] = 'NA';
         }
         if ('費用單位' in targetHeaderMap) {
-          row[targetHeaderMap['費用單位']] = unitKey;
+          row[targetHeaderMap['費用單位']] = getGroupAllocationUnitDisplay_(unitKey);
         }
         if ('費用類型' in targetHeaderMap) {
           row[targetHeaderMap['費用類型']] = costType;
@@ -251,6 +280,28 @@ function normalizeUnitKey_(value) {
     return segments[0];
   }
   return segments[0] + ' : ' + segments[1];
+}
+
+function getGroupAllocationUnitDisplay_(unitKey) {
+  var mapping = {
+    '執行長室 : 管理中心': '執行長室 : 管理中心 : 管理中心',
+    '執行長室 : 財務中心': '執行長室 : 財務中心 : 財務中心',
+    '執行長室 : 研發中心': '執行長室 : 研發中心 : 研發中心',
+    '執行長室 : 行銷營運中心': '執行長室 : 行銷營運中心 : 行銷營運中心',
+    '執行長室 : 客戶價值中心': '執行長室 : 客戶價值中心 : 客戶價值中心',
+    '執行長室 : 策略資料中心': '執行長室 : 策略資料中心 : 策略資料中心',
+  };
+  return mapping[unitKey] || unitKey;
+}
+
+function getSplitConfigForUnit_(unitKey) {
+  for (var i = 0; i < GROUP_ALLOCATION_CONFIGS_.length; i++) {
+    var group = GROUP_ALLOCATION_CONFIGS_[i];
+    if (group.unitSet.has(unitKey)) {
+      return group.splitConfig;
+    }
+  }
+  return null;
 }
 
 function indexOfNth_(str, char, occurrence) {
