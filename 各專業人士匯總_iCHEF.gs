@@ -10,7 +10,9 @@ const PERSONNEL_GROUPS = {
       { id: '1GPAPW3ZM3lY1Qmpb9LocnB27XWJ8AGybGhMNAy2KH0c', label: '財務中心' },
       { id: '1mYeC6DpUqFvnce9leb-098wSYCGqfOR5_HGDM2bcbEc', label: '客戶價值中心' },
       { id: '1Pt2ru3sBxa8TpMfTsfQLjJqdTzZZk0AYpAJvc9TjFY8', label: '行銷營運中心' },
-      { id: '1ALyHp6xEMt8xt3T9zpEA52ZUzaDPy-QT-rRh6gU75_g', label: '研發中心' }
+      { id: '1ALyHp6xEMt8xt3T9zpEA52ZUzaDPy-QT-rRh6gU75_g', label: '研發中心' },
+      { id: '1Nk_TXUKf5uX0P-fmbP9jlSio6qB1pH1V4XFFsUWWIzM', label: '執行長室' },
+      { id: '1XCORsakXwHErz2AxHTTBY1a1yxsN78scGKOd7_uIPss', label: '執行長室 OMO ' }
     ]
   },
   QLR: {
@@ -76,6 +78,13 @@ function consolidateHeadcount() {
 
 function consolidateHeadcountQLR() {
   syncPersonnelData('QLR');
+}
+
+function onOpen(e) {
+  const ui = (e && e.source && typeof e.source.getUi === 'function')
+    ? e.source.getUi()
+    : SpreadsheetApp.getUi();
+  addPersonnelSyncMenus_(ui);
 }
 
 function addPersonnelSyncMenus_(ui) {
