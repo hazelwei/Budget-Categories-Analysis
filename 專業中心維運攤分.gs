@@ -10,8 +10,6 @@ function addMaintenanceMenu_(ui) {
 }
 
 function distributeMaintenanceCosts() {
-  // TODO: 使用前請更新對應的 SPREADSHEET_ID。
-  const SPREADSHEET_ID = '1mYeC6DpUqFvnce9leb-098wSYCGqfOR5_HGDM2bcbEc';
   const SOURCE_SHEET_NAME = '2.2_事業維運費用_$';
   const TARGET_SHEET_NAME = '維運攤分';
 
@@ -61,7 +59,10 @@ function distributeMaintenanceCosts() {
     '執行長室 : 策略資料中心': '執行長室 : 策略資料中心 : 策略資料中心',
   };
 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('找不到目前活頁簿，請在目標試算表中執行維運攤分。');
+  }
   const sourceSheet = ss.getSheetByName(SOURCE_SHEET_NAME);
   if (!sourceSheet) {
     throw new Error('找不到來源分頁：' + SOURCE_SHEET_NAME);

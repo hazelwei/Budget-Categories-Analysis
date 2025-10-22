@@ -48,7 +48,6 @@ const GROUP_ALLOCATION_VALID_UNITS_ = (function () {
 })();
 
 function distributeGroupAllocations() {
-  const SPREADSHEET_ID = '1mYeC6DpUqFvnce9leb-098wSYCGqfOR5_HGDM2bcbEc';
   const SOURCE_SHEET_NAME = '3.2_集團共用資源_$';
   const TARGET_SHEET_NAME = '集團攤分';
 
@@ -62,7 +61,7 @@ function distributeGroupAllocations() {
   const VALID_PROJECT_CODES = new Set(['NA', '']);
   const VALID_UNITS = GROUP_ALLOCATION_VALID_UNITS_;
 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = ss.getSheetByName(SOURCE_SHEET_NAME);
   if (!sourceSheet) {
     throw new Error('找不到來源分頁：' + SOURCE_SHEET_NAME);
@@ -348,4 +347,126 @@ function collectDirectPersonnelTotals_(rows, headerMap, monthColumns) {
     accumulateMonthlyTotals_(totalsMap, key, monthColumns, row);
   });
   return totalsMap;
+}
+
+function buildHeaderMap_(headers) {
+  var map = {};
+  headers.forEach(function (header, index) {
+    if (header && !(header in map)) {
+      map[header] = index;
+    }
+  });
+  return map;
+}
+
+function matchesCriteria_(row, headerMap, criteria) {
+  return Object.keys(criteria).every(function (key) {
+    if (!(key in headerMap)) {
+      throw new Error('來源表頭缺少欄位：' + key);
+    }
+    var value = normalizeString_(row[headerMap[key]]);
+    return value === normalizeString_(criteria[key]);
+  });
+}
+
+function detectMonthColumns_(headers, rows, reservedHeaders) {
+  var reserved = reservedHeaders || new Set();
+  return headers.reduce(function (acc, header, index) {
+    if (!header || reserved.has(header)) {
+      return acc;
+    }
+    if (!isMonthlyHeader_(header)) {
+      return acc;
+    }
+    var hasNumeric = rows.some(function (row) {
+      return typeof row[index] === 'number' && !isNaN(row[index]);
+    });
+    if (hasNumeric) {
+      acc.push({ header: header, index: index });
+    }
+    return acc;
+  }, []);
+}
+
+function isMonthlyHeader_(header) {
+  var MONTH_PATTERN =
+    /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Q[1-4]|月|20\d{2}|總計|合計|總額|Total|Sum)/i;
+  return MONTH_PATTERN.test(header);
+}
+
+function toNumber_(value) {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    var parsed = parseFloat(value.replace(/,/g, ''));
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+function roundAmount_(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function allocateByShares_(total, shares) {
+  var allocations = [];
+  var remaining = total;
+  for (var i = 0; i < shares.length; i++) {
+    var amount;
+    if (i === shares.length - 1) {
+      amount = roundAmount_(remaining);
+    } else {
+      amount = roundAmount_(total * shares[i]);
+      remaining = roundAmount_(remaining - amount);
+    }
+    allocations.push(amount);
+  }
+  return allocations;
+}
+
+function removeExistingAllocations_(sheet, referenceFields, headerMap) {
+  var dataRange = sheet.getDataRange();
+  if (dataRange.getNumRows() < 2) {
+    return;
+  }
+  var values = dataRange.getValues();
+  var headers = values[0];
+  var map = headerMap || buildHeaderMap_(headers);
+  var matchFields = referenceFields || {};
+  var rowsToDelete = [];
+  for (var i = 1; i < values.length; i++) {
+    if (rowMatches_(values[i], map, matchFields)) {
+      rowsToDelete.push(i + 1); // 1-based row index
+    }
+  }
+  rowsToDelete
+    .sort(function (a, b) {
+      return b - a;
+    })
+    .forEach(function (rowIndex) {
+      sheet.deleteRow(rowIndex);
+    });
+}
+
+function rowMatches_(row, headerMap, fields) {
+  return Object.keys(fields).every(function (key) {
+    if (!(key in headerMap)) {
+      return false;
+    }
+    return normalizeString_(row[headerMap[key]]) === normalizeString_(fields[key]);
+  });
+}
+
+function normalizeString_(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number') {
+    return String(value);
+  }
+  return String(value).trim();
 }

@@ -5,6 +5,11 @@ function addHeadcountMenu_(ui) {
     .addToUi();
 }
 
+function onOpen(e) {
+  const ui = e && e.source ? e.source.getUi() : SpreadsheetApp.getUi();
+  addHeadcountMenu_(ui);
+}
+
 function onInstall() {
   onOpen();
 }
