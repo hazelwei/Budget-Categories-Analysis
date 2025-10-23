@@ -24,19 +24,16 @@ function consolidateMaintenanceCosts() {
   ];
 
   const filters = {
-    // TODO: 使用前請更新對應的 subsidiary,businessUnit。
-    subsidiary: 'QLR',
-    businessUnit: 'OMO',
-    siExclusions: ['Maintenance', 'Corporation'],
-    taExclusions: ['Baseline', 'Corporation'],
-    projectCodeExclusions: ['NA']
+    // TODO: 使用前請更新對應的 subsidiary、businessUnit。
+    subsidiary: 'TW',
+    businessUnit: 'OMO'
   };
 
   let header = null;
   const aggregatedRows = [];
 
   SOURCE_SPREADSHEET_IDS.forEach(spreadsheetId => {
-    const dataset = loadSourceDataset_(spreadsheetId, SOURCE_SHEET_NAME);
+    const dataset = loadMaintenanceDataset_(spreadsheetId, SOURCE_SHEET_NAME);
     if (!dataset.header.length) return;
 
     if (!header) header = dataset.header;
@@ -54,6 +51,16 @@ function consolidateMaintenanceCosts() {
 
   const targetSpreadsheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
   writeToTarget_(targetSpreadsheetId, TARGET_SHEET_NAME, header, aggregatedRows);
+}
+
+function loadMaintenanceDataset_(spreadsheetId, sheetName) {
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log(`跳過來源：${spreadsheetId}，沒有找到分頁：${sheetName}`);
+    return { header: [], rows: [] };
+  }
+  return readSheetDataset_(sheet);
 }
 
 function hasMaintenanceContent_(row) {
