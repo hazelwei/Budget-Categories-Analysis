@@ -50,6 +50,15 @@ function distributeMaintenanceCosts() {
     },
   ];
 
+  const QLR_TARGET_FIELDS = {
+    '子公司': 'QLR',
+    '事業單位': 'OMO',
+    'Si 編號': 'Maintenance',
+    'TA 編號': 'Baseline',
+    '價值鏈專案預算代號': 'NA',
+    '費用項目': '維運費用分攤',
+  };
+
   const COST_UNIT_MAPPING = {
     '執行長室 : 管理中心': '執行長室 : 管理中心 : 管理中心',
     '執行長室 : 財務中心': '執行長室 : 財務中心 : 財務中心',
@@ -96,6 +105,16 @@ function distributeMaintenanceCosts() {
     Logger.log('沒有符合條件的來源資料 (Corporation)。');
   }
 
+  const qlrRows = sourceValues.slice(1).filter(function (row) {
+    return matchesCriteria_(row, sourceHeaderMap, {
+      '子公司': 'QLR',
+      '事業單位': 'OMO',
+      'Si 編號': 'Maintenance',
+      'TA 編號': 'Baseline',
+      '價值鏈專案預算代號': 'NA',
+    });
+  });
+
   const fallbackRows =
     baseRows.length > 0
       ? baseRows
@@ -105,7 +124,7 @@ function distributeMaintenanceCosts() {
           return subsidiary === 'TW' && (businessUnit === 'POS' || businessUnit === 'OMO');
         });
 
-  if (fallbackRows.length === 0) {
+  if (fallbackRows.length === 0 && qlrRows.length === 0) {
     Logger.log('沒有可供分攤或直接加總的維運資料。');
     removeExistingAllocations_(targetSheet, {
       '子公司': 'TW',
@@ -117,31 +136,40 @@ function distributeMaintenanceCosts() {
     return;
   }
 
-  const targetCostUnit = determineTargetCostUnit_(baseRows, fallbackRows, sourceHeaderMap, COST_UNIT_MAPPING);
-  const splitConfig = applyCostUnitToSplitConfig_(SPLIT_CONFIG_TEMPLATE, targetCostUnit);
-
-  const reservedHeaderNames = collectReservedHeaders_(BASE_FILTER, splitConfig);
-  const monthSourceRows = baseRows.length > 0 ? baseRows : fallbackRows;
+  const hasSplitSource = baseRows.length > 0 || fallbackRows.length > 0;
+  let splitConfig = null;
+  let reservedHeaderNames;
+  if (hasSplitSource) {
+    const targetCostUnit = determineTargetCostUnit_(baseRows, fallbackRows, sourceHeaderMap, COST_UNIT_MAPPING);
+    splitConfig = applyCostUnitToSplitConfig_(SPLIT_CONFIG_TEMPLATE, targetCostUnit);
+    reservedHeaderNames = collectReservedHeaders_(BASE_FILTER, splitConfig);
+  } else {
+    reservedHeaderNames = collectReservedHeaders_(BASE_FILTER, SPLIT_CONFIG_TEMPLATE);
+  }
+  const monthSourceRows =
+    baseRows.length > 0 ? baseRows : fallbackRows.length > 0 ? fallbackRows : qlrRows;
   const monthColumns = detectMonthColumns_(sourceHeaders, monthSourceRows, reservedHeaderNames);
   if (monthColumns.length === 0) {
     throw new Error('找不到任何看起來像月份的欄位，請確認表頭設定。');
   }
 
   const costTypeTotals = {};
-  ALLOWED_COST_TYPES.forEach(function (costType) {
-    costTypeTotals[costType] = monthColumns.map(function () {
-      return 0;
+  if (hasSplitSource) {
+    ALLOWED_COST_TYPES.forEach(function (costType) {
+      costTypeTotals[costType] = monthColumns.map(function () {
+        return 0;
+      });
     });
-  });
-  baseRows.forEach(function (row) {
-    const costType = normalizeString_(row[sourceHeaderMap['費用類型']]);
-    if (!ALLOWED_COST_TYPES.includes(costType)) {
-      return;
-    }
-    monthColumns.forEach(function (monthCol, index) {
-      costTypeTotals[costType][index] += toNumber_(row[monthCol.index]);
+    baseRows.forEach(function (row) {
+      const costType = normalizeString_(row[sourceHeaderMap['費用類型']]);
+      if (!ALLOWED_COST_TYPES.includes(costType)) {
+        return;
+      }
+      monthColumns.forEach(function (monthCol, index) {
+        costTypeTotals[costType][index] += toNumber_(row[monthCol.index]);
+      });
     });
-  });
+  }
 
   const targetValues = targetSheet.getDataRange().getValues();
   if (targetValues.length === 0) {
@@ -157,68 +185,115 @@ function distributeMaintenanceCosts() {
     '價值鏈專案預算代號': 'NA',
     '費用項目': '維運費用分攤',
   }, targetHeaderMap);
-
-  const directPersonnelTotals = collectDirectMaintenancePersonnelTotals_(
-    sourceValues.slice(1),
-    sourceHeaderMap,
-    monthColumns,
-    splitConfig
-  );
-  const directNonPersonnelTotals = collectDirectMaintenanceNonPersonnelTotals_(
-    sourceValues.slice(1),
-    sourceHeaderMap,
-    monthColumns,
-    splitConfig
-  );
-
-  const shares = splitConfig.map(function (config) {
-    return config.share;
-  });
+  removeExistingAllocations_(targetSheet, QLR_TARGET_FIELDS, targetHeaderMap);
 
   const outputRows = [];
-  ALLOWED_COST_TYPES.forEach(function (costType) {
-    const totals = costTypeTotals[costType];
-    const hasTotals = hasNonZero_(totals);
-    const allocations = hasTotals
-      ? totals.map(function (total) {
-          return allocateByShares_(total, shares);
-        })
-      : monthColumns.map(function () {
-          return shares.map(function () {
-            return 0;
-          });
-        });
+  if (hasSplitSource && splitConfig) {
+    const directPersonnelTotals = collectDirectMaintenancePersonnelTotals_(
+      sourceValues.slice(1),
+      sourceHeaderMap,
+      monthColumns,
+      splitConfig
+    );
+    const directNonPersonnelTotals = collectDirectMaintenanceNonPersonnelTotals_(
+      sourceValues.slice(1),
+      sourceHeaderMap,
+      monthColumns,
+      splitConfig
+    );
 
-    splitConfig.forEach(function (config, configIndex) {
-      const row = new Array(targetHeaders.length).fill('');
-      Object.keys(config.fields).forEach(function (key) {
-        if (key in targetHeaderMap) {
-          row[targetHeaderMap[key]] = config.fields[key];
+    const shares = splitConfig.map(function (config) {
+      return config.share;
+    });
+
+    ALLOWED_COST_TYPES.forEach(function (costType) {
+      const totals = costTypeTotals[costType] || monthColumns.map(function () {
+        return 0;
+      });
+      const hasTotals = hasNonZero_(totals);
+      const allocations = hasTotals
+        ? totals.map(function (total) {
+            return allocateByShares_(total, shares);
+          })
+        : monthColumns.map(function () {
+            return shares.map(function () {
+              return 0;
+            });
+          });
+
+      splitConfig.forEach(function (config, configIndex) {
+        const row = new Array(targetHeaders.length).fill('');
+        Object.keys(config.fields).forEach(function (key) {
+          if (key in targetHeaderMap) {
+            row[targetHeaderMap[key]] = config.fields[key];
+          }
+        });
+        if ('費用類型' in targetHeaderMap) {
+          row[targetHeaderMap['費用類型']] = costType;
+        }
+        let hasRowData = false;
+        monthColumns.forEach(function (monthCol, monthIndex) {
+          if (!(monthCol.header in targetHeaderMap)) {
+            Logger.log('目的分頁缺少欄位：' + monthCol.header + '，略過該欄位。');
+            return;
+          }
+          let value = allocations[monthIndex][configIndex] || 0;
+          if (costType === '人事費用') {
+            const directKey = config.fields['子公司'] + '|' + config.fields['事業單位'];
+            const directTotals = directPersonnelTotals.get(directKey);
+            if (directTotals) {
+              value = roundAmount_(value + directTotals[monthIndex]);
+            }
+          } else if (costType === '非人事費用') {
+            const directKey = config.fields['子公司'] + '|' + config.fields['事業單位'];
+            const directTotals = directNonPersonnelTotals.get(directKey);
+            if (directTotals) {
+              value = roundAmount_(value + directTotals[monthIndex]);
+            }
+          }
+          if (Math.abs(value) > 0) {
+            hasRowData = true;
+          }
+          row[targetHeaderMap[monthCol.header]] = value;
+        });
+        if (hasRowData) {
+          outputRows.push(row);
         }
       });
+    });
+  }
+
+  if (qlrRows.length > 0) {
+    const qlrTotals = collectQlrMaintenanceTotals_(
+      qlrRows,
+      sourceHeaderMap,
+      monthColumns,
+      COST_UNIT_MAPPING,
+      ALLOWED_COST_TYPES
+    );
+    qlrTotals.forEach(function (bucket) {
+      if (!hasNonZero_(bucket.totals)) {
+        return;
+      }
+      const row = new Array(targetHeaders.length).fill('');
+      Object.keys(QLR_TARGET_FIELDS).forEach(function (key) {
+        if (key in targetHeaderMap) {
+          row[targetHeaderMap[key]] = QLR_TARGET_FIELDS[key];
+        }
+      });
+      if ('費用單位' in targetHeaderMap) {
+        row[targetHeaderMap['費用單位']] = bucket.costUnit;
+      }
       if ('費用類型' in targetHeaderMap) {
-        row[targetHeaderMap['費用類型']] = costType;
+        row[targetHeaderMap['費用類型']] = bucket.costType;
       }
       let hasRowData = false;
-      monthColumns.forEach(function (monthCol, monthIndex) {
+      monthColumns.forEach(function (monthCol, index) {
         if (!(monthCol.header in targetHeaderMap)) {
           Logger.log('目的分頁缺少欄位：' + monthCol.header + '，略過該欄位。');
           return;
         }
-        let value = allocations[monthIndex][configIndex] || 0;
-        if (costType === '人事費用') {
-          const directKey = config.fields['子公司'] + '|' + config.fields['事業單位'];
-          const directTotals = directPersonnelTotals.get(directKey);
-          if (directTotals) {
-            value = roundAmount_(value + directTotals[monthIndex]);
-          }
-        } else if (costType === '非人事費用') {
-          const directKey = config.fields['子公司'] + '|' + config.fields['事業單位'];
-          const directTotals = directNonPersonnelTotals.get(directKey);
-          if (directTotals) {
-            value = roundAmount_(value + directTotals[monthIndex]);
-          }
-        }
+        const value = roundAmount_(bucket.totals[index]);
         if (Math.abs(value) > 0) {
           hasRowData = true;
         }
@@ -228,7 +303,7 @@ function distributeMaintenanceCosts() {
         outputRows.push(row);
       }
     });
-  });
+  }
 
   if (outputRows.length === 0) {
     Logger.log('沒有需要輸出的維運攤分資料，已清除既有資料列。');
@@ -503,6 +578,45 @@ function collectDirectMaintenanceNonPersonnelTotals_(rows, headerMap, monthColum
     accumulateMonthlyTotals_(totalsMap, comboKey, monthColumns, row);
   });
   return totalsMap;
+}
+
+function collectQlrMaintenanceTotals_(rows, headerMap, monthColumns, costUnitMap, allowedCostTypes) {
+  var buckets = new Map();
+  rows.forEach(function (row) {
+    var costType = normalizeString_(row[headerMap['費用類型']]);
+    if (!allowedCostTypes.includes(costType)) {
+      return;
+    }
+    var unitPrefix = extractCostUnitPrefix_(row[headerMap['費用單位']]);
+    if (!unitPrefix) {
+      return;
+    }
+    var mappedUnit = costUnitMap[unitPrefix];
+    if (!mappedUnit) {
+      throw new Error('QLR 維運費用單位無法辨識：' + unitPrefix);
+    }
+    var key = mappedUnit + '|' + costType;
+    if (!buckets.has(key)) {
+      buckets.set(
+        key,
+        monthColumns.map(function () {
+          return 0;
+        })
+      );
+    }
+    var totals = buckets.get(key);
+    monthColumns.forEach(function (monthCol, index) {
+      totals[index] += toNumber_(row[monthCol.index]);
+    });
+  });
+  return Array.from(buckets.entries()).map(function (entry) {
+    var parts = entry[0].split('|');
+    return {
+      costUnit: parts[0],
+      costType: parts[1],
+      totals: entry[1],
+    };
+  });
 }
 
 function accumulateMonthlyTotals_(bucketMap, unitKey, monthColumns, row) {

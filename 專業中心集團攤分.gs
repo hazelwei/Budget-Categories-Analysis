@@ -47,12 +47,13 @@ const GROUP_ALLOCATION_VALID_UNITS_ = (function () {
   return result;
 })();
 
+const GROUP_ALLOCATION_ALLOWED_SUBSIDIARIES_ = new Set(['TW', 'QLR']);
+
 function distributeGroupAllocations() {
   const SOURCE_SHEET_NAME = '3.2_集團共用資源_$';
   const TARGET_SHEET_NAME = '集團攤分';
 
   const BASE_FILTER = {
-    '子公司': 'TW',
     '事業單位': 'Corporation',
     'Si 編號': 'Corporation',
     'TA 編號': 'Corporation',
@@ -95,6 +96,7 @@ function distributeGroupAllocations() {
   ], '來源分頁');
 
   const reservedHeaders = new Set(Object.keys(BASE_FILTER));
+  reservedHeaders.add('子公司');
   ['價值鏈專案預算代號', '費用單位', '費用類型', '費用項目'].forEach(function (key) {
     reservedHeaders.add(key);
   });
@@ -115,6 +117,10 @@ function distributeGroupAllocations() {
     }
     const projectCode = normalizeString_(row[sourceHeaderMap['價值鏈專案預算代號']]).toUpperCase();
     if (!VALID_PROJECT_CODES.has(projectCode)) {
+      return false;
+    }
+    const subsidiary = normalizeString_(row[sourceHeaderMap['子公司']]);
+    if (!GROUP_ALLOCATION_ALLOWED_SUBSIDIARIES_.has(subsidiary)) {
       return false;
     }
     const rawUnit = normalizeString_(row[sourceHeaderMap['費用單位']]);
@@ -335,8 +341,9 @@ function collectDirectPersonnelTotals_(rows, headerMap, monthColumns) {
     if (!subsidiary) {
       return;
     }
-    var businessUnit = normalizeString_(row[headerMap['事業單位']]);
-    if (businessUnit !== 'POS' && businessUnit !== 'OMO') {
+    var businessUnitRaw = normalizeString_(row[headerMap['事業單位']]);
+    var businessUnit = normalizeBusinessUnitForDirectPersonnel_(subsidiary, businessUnitRaw);
+    if (!businessUnit) {
       return;
     }
     var unitKey = normalizeUnitKey_(normalizeString_(row[headerMap['費用單位']]));
@@ -347,6 +354,16 @@ function collectDirectPersonnelTotals_(rows, headerMap, monthColumns) {
     accumulateMonthlyTotals_(totalsMap, key, monthColumns, row);
   });
   return totalsMap;
+}
+
+function normalizeBusinessUnitForDirectPersonnel_(subsidiary, businessUnit) {
+  if (businessUnit === 'POS' || businessUnit === 'OMO') {
+    return businessUnit;
+  }
+  if (businessUnit === 'Corporation' && subsidiary === 'QLR') {
+    return 'OMO';
+  }
+  return '';
 }
 
 function buildHeaderMap_(headers) {

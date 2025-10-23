@@ -7,6 +7,9 @@ function onOpen() {
   if (typeof addHeadcountMenu_ === 'function') {
     addHeadcountMenu_(ui);
   }
+  if (typeof addPersonnelCostBackfillMenu_ === 'function') {
+    addPersonnelCostBackfillMenu_(ui);
+  }
   if (typeof addMaintenanceMenu_ === 'function') {
     addMaintenanceMenu_(ui);
   }
