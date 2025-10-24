@@ -12,8 +12,6 @@ function consolidateHeadcount() {
 
 function consolidateAllResources() {
   const SOURCE_SHEET_PATTERN = '1.2_各事業 TA 預算規劃_$';
-    // TODO: 使用前請更新對應的 SPREADSHEET_ID。
-  const TARGET_SPREADSHEET_ID = '1Lg520_67UD8MtVwhK1hJgybh377knWyz8iQPjwKDLbM';
   const TARGET_SHEET_NAME = '2.6_TA 專案所需資源（匯總）';
 
   const SOURCE_SPREADSHEET_IDS = [
@@ -33,7 +31,7 @@ function consolidateAllResources() {
   const filters = {
     // TODO: 使用前請更新對應的 subsidiary,businessUnit。
     subsidiary: 'QLR',
-    businessUnit: 'OMO',
+    businessUnit: ['OMO', '2C'],
     siExclusions: ['Maintenance', 'Corporation'],
     taExclusions: ['Baseline', 'Corporation'],
     projectCodeExclusions: ['NA']
@@ -54,13 +52,12 @@ function consolidateAllResources() {
     throw new Error('來源試算表沒有可用的標題列');
   }
 
-  writeToTarget_(TARGET_SPREADSHEET_ID, TARGET_SHEET_NAME, header, aggregatedRows, 2);
+  const targetSpreadsheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
+  writeToTarget_(targetSpreadsheetId, TARGET_SHEET_NAME, header, aggregatedRows, 2);
 }
 
 function syncTaResourceSheets() {
   const SOURCE_SHEET_NAME = '事業人力資源配置匯總表(自動彙整)';
-    // TODO: 使用前請更新對應的 SPREADSHEET_ID。
-  const TARGET_SPREADSHEET_ID = '1Lg520_67UD8MtVwhK1hJgybh377knWyz8iQPjwKDLbM';
   const TARGET_SHEET_NAME = '2.5_TA 專案所需資源（人力）';
 
   const SOURCE_SPREADSHEET_IDS = [
@@ -80,7 +77,7 @@ function syncTaResourceSheets() {
   const filters = {
     // TODO: 使用前請更新對應的 subsidiary,businessUnit。
     subsidiary: 'QLR',
-    businessUnit: 'OMO',
+    businessUnit: ['OMO', '2C'],
     siExclusions: ['Maintenance', 'Corporation'],
     taExclusions: ['Baseline', 'Corporation'],
     projectCodeExclusions: ['NA']
@@ -101,7 +98,8 @@ function syncTaResourceSheets() {
     throw new Error('來源試算表沒有可用的標題列');
   }
 
-  writeToTarget_(TARGET_SPREADSHEET_ID, TARGET_SHEET_NAME, header, aggregatedRows);
+  const targetSpreadsheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
+  writeToTarget_(targetSpreadsheetId, TARGET_SHEET_NAME, header, aggregatedRows);
 }
 
 function loadDatasetBySheetPattern_(spreadsheetId, sheetNamePattern) {
@@ -156,10 +154,10 @@ function readSheetDataset_(sheet) {
 
 function rowMatchesFilters_(row, filters) {
   const subsidiary = normalizeString_(row[0]);
-  if (filters.subsidiary && subsidiary !== filters.subsidiary) return false;
+  if (!matchesFilter_(subsidiary, filters.subsidiary)) return false;
 
   const businessUnit = normalizeString_(row[1]);
-  if (filters.businessUnit && businessUnit !== filters.businessUnit) return false;
+  if (!matchesFilter_(businessUnit, filters.businessUnit)) return false;
 
   const siId = normalizeString_(row[2]);
   if (Array.isArray(filters.siExclusions) && filters.siExclusions.includes(siId)) return false;
@@ -171,6 +169,20 @@ function rowMatchesFilters_(row, filters) {
   if (Array.isArray(filters.projectCodeExclusions) && filters.projectCodeExclusions.includes(projectCode)) return false;
 
   return true;
+}
+
+function matchesFilter_(value, filter) {
+  if (filter === undefined || filter === null) return true;
+
+  if (Array.isArray(filter)) {
+    if (!filter.length) return true;
+    return filter.some(candidate => normalizeString_(candidate) === normalizeString_(value));
+  }
+
+  const normalizedFilter = normalizeString_(filter);
+  if (!normalizedFilter) return true;
+
+  return normalizeString_(value) === normalizedFilter;
 }
 
 function writeToTarget_(spreadsheetId, sheetName, header, rows, startColumn) {
