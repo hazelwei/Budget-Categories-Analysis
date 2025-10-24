@@ -350,7 +350,7 @@ function applyPersonnelAggregatesToTarget_(sheet, referenceKeys, sourceData, con
 function buildPersonnelKeyFromRow_(row) {
   const codes = PERSONNEL_COST_BACKFILL_KEY_INDEXES.map(function (columnIndex) {
     const value = columnIndex < row.length ? row[columnIndex] : '';
-    return normalizeMaybe_(value);
+    return normalizePersonnelBackfillKeyValue_(value, columnIndex);
   });
   const hasValue = codes.some(function (code) {
     return !!code;
@@ -512,6 +512,34 @@ function sanitizeTotal_(value) {
   }
   const rounded = Math.round(value * 100) / 100;
   return Math.abs(rounded) === 0 ? 0 : rounded;
+}
+
+function normalizePersonnelBackfillKeyValue_(value, columnIndex) {
+  const normalized = normalizeMaybe_(value);
+  if (!normalized) {
+    return '';
+  }
+  const costUnitColumn =
+    PERSONNEL_COST_BACKFILL_KEY_INDEXES[PERSONNEL_COST_BACKFILL_KEY_INDEXES.length - 1];
+  if (columnIndex === costUnitColumn) {
+    return normalizePersonnelBackfillUnit_(normalized);
+  }
+  return normalized;
+}
+
+function normalizePersonnelBackfillUnit_(value) {
+  let normalized = normalizeMaybe_(value);
+  if (!normalized) {
+    return '';
+  }
+  normalized = normalized.replace(/：/g, ':');
+  const segments = normalized.split(/\s*:\s*/).filter(function (segment) {
+    return !!segment;
+  });
+  if (!segments.length) {
+    return '';
+  }
+  return segments.join(' : ');
 }
 
 function normalizeMaybe_(value) {

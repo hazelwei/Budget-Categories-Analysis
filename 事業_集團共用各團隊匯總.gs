@@ -1,13 +1,13 @@
-function addMaintenanceSummaryMenu_(ui) {
+function addGroupSummaryMenu_(ui) {
   (ui || SpreadsheetApp.getUi())
-    .createMenu('維運費用匯總')
-    .addItem('執行匯總', 'consolidateMaintenanceCosts')
+    .createMenu('集團分攤匯總')
+    .addItem('執行匯總', 'consolidateGroupAllocations')
     .addToUi();
 }
 
-function consolidateMaintenanceCosts() {
-  const SOURCE_SHEET_NAME = '維運攤分';
-  const TARGET_SHEET_NAME = '2.7_維運所需資源（清單）';
+function consolidateGroupAllocations() {
+  const SOURCE_SHEET_NAME = '集團攤分';
+  const TARGET_SHEET_NAME = '2.8_集團分攤資源（清單）';
 
   const SOURCE_SPREADSHEET_IDS = [
     '10jcSlS4RvuGm1DK4KnyKz0YBVxHE_2OCnrBgAgqui9U', // QLR 2026 管理中心預算表
@@ -33,14 +33,14 @@ function consolidateMaintenanceCosts() {
   const aggregatedRows = [];
 
   SOURCE_SPREADSHEET_IDS.forEach(spreadsheetId => {
-    const dataset = loadMaintenanceDataset_(spreadsheetId, SOURCE_SHEET_NAME);
+    const dataset = loadGroupAllocationDataset_(spreadsheetId, SOURCE_SHEET_NAME);
     if (!dataset.header.length) return;
 
     if (!header) header = dataset.header;
 
     const effectiveRows = dataset.rows
       .filter(row => rowMatchesFilters_(row, filters))
-      .filter(hasMaintenanceContent_);
+      .filter(hasGroupAllocationContent_);
 
     aggregatedRows.push(...effectiveRows);
   });
@@ -53,7 +53,7 @@ function consolidateMaintenanceCosts() {
   writeToTarget_(targetSpreadsheetId, TARGET_SHEET_NAME, header, aggregatedRows);
 }
 
-function loadMaintenanceDataset_(spreadsheetId, sheetName) {
+function loadGroupAllocationDataset_(spreadsheetId, sheetName) {
   const ss = SpreadsheetApp.openById(spreadsheetId);
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
@@ -63,20 +63,20 @@ function loadMaintenanceDataset_(spreadsheetId, sheetName) {
   return readSheetDataset_(sheet);
 }
 
-function hasMaintenanceContent_(row) {
+function hasGroupAllocationContent_(row) {
   return row.some(value => {
     if (value === null || value === undefined) return false;
     if (value instanceof Date) return true;
     if (typeof value === 'number') return value !== 0;
     if (typeof value === 'boolean') return true;
     if (typeof value === 'string') {
-      return maintenanceNormalizeString_(value) !== '';
+      return groupNormalizeString_(value) !== '';
     }
-    return maintenanceNormalizeString_(value) !== '';
+    return groupNormalizeString_(value) !== '';
   });
 }
 
-function maintenanceNormalizeString_(value) {
+function groupNormalizeString_(value) {
   if (typeof normalizeString_ === 'function') {
     return normalizeString_(value);
   }
