@@ -42,9 +42,12 @@ function consolidateAllResources() {
 
   SOURCE_SPREADSHEET_IDS.forEach(spreadsheetId => {
     const dataset = loadDatasetBySheetPattern_(spreadsheetId, SOURCE_SHEET_PATTERN);
-    if (!header || !header.length) header = dataset.header;
     if (!dataset.header || !dataset.header.length) return;
-    const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters));
+
+    if (!header || !header.length) header = dataset.header;
+
+    const headerMap = buildHeaderMap_(dataset.header);
+    const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters, headerMap));
     aggregatedRows.push(...matchedRows);
   });
 
@@ -53,7 +56,7 @@ function consolidateAllResources() {
   }
 
   const targetSpreadsheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
-  writeToTarget_(targetSpreadsheetId, TARGET_SHEET_NAME, header, aggregatedRows, 2);
+  writeRowsAlignedToTarget_(targetSpreadsheetId, TARGET_SHEET_NAME, header, aggregatedRows);
 }
 
 function syncTaResourceSheets() {
@@ -88,9 +91,12 @@ function syncTaResourceSheets() {
 
   SOURCE_SPREADSHEET_IDS.forEach(spreadsheetId => {
     const dataset = loadSourceDataset_(spreadsheetId, SOURCE_SHEET_NAME);
-    if (!header && dataset.header.length) header = dataset.header;
     if (!dataset.header.length) return;
-    const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters));
+
+    if (!header) header = dataset.header;
+
+    const headerMap = buildHeaderMap_(dataset.header);
+    const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters, headerMap));
     aggregatedRows.push(...matchedRows);
   });
 
@@ -152,23 +158,45 @@ function readSheetDataset_(sheet) {
   return { header, rows };
 }
 
-function rowMatchesFilters_(row, filters) {
-  const subsidiary = normalizeString_(row[0]);
+function rowMatchesFilters_(row, filters, headerMap) {
+  const resolver = createRowValueResolver_(row, headerMap);
+
+  const subsidiary = normalizeString_(resolver('子公司', 0));
   if (!matchesFilter_(subsidiary, filters.subsidiary)) return false;
 
-  const businessUnit = normalizeString_(row[1]);
+  const businessUnit = normalizeString_(resolver('事業單位', 1));
   if (!matchesFilter_(businessUnit, filters.businessUnit)) return false;
 
-  const siId = normalizeString_(row[2]);
+  const siId = normalizeString_(resolver('Si 編號', 2));
   if (Array.isArray(filters.siExclusions) && filters.siExclusions.includes(siId)) return false;
 
-  const taId = normalizeString_(row[3]);
+  const taId = normalizeString_(resolver('TA 編號', 3));
   if (Array.isArray(filters.taExclusions) && filters.taExclusions.includes(taId)) return false;
 
-  const projectCode = normalizeString_(row[4]);
+  const projectCode = normalizeString_(resolver('價值鏈專案預算代號', 4));
   if (Array.isArray(filters.projectCodeExclusions) && filters.projectCodeExclusions.includes(projectCode)) return false;
 
   return true;
+}
+
+function createRowValueResolver_(row, headerMap) {
+  const effectiveMap = headerMap || null;
+
+  return function(columnName, fallbackIndex) {
+    if (effectiveMap && columnName) {
+      const key = normalizeString_(columnName);
+      if (key && Object.prototype.hasOwnProperty.call(effectiveMap, key)) {
+        const index = effectiveMap[key];
+        if (typeof index === 'number' && index >= 0 && index < row.length) {
+          return row[index];
+        }
+      }
+    }
+    if (typeof fallbackIndex === 'number' && fallbackIndex >= 0 && fallbackIndex < row.length) {
+      return row[fallbackIndex];
+    }
+    return undefined;
+  };
 }
 
 function matchesFilter_(value, filter) {
@@ -207,6 +235,56 @@ function writeToTarget_(spreadsheetId, sheetName, header, rows, startColumn) {
   }
 }
 
+function writeRowsAlignedToTarget_(spreadsheetId, sheetName, sourceHeader, rows) {
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`找不到目標分頁：${sheetName}`);
+
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) {
+    throw new Error(`目標分頁缺少標題列：${sheetName}`);
+  }
+
+  const targetHeader = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  if (!targetHeader.length) {
+    throw new Error(`目標分頁缺少標題列：${sheetName}`);
+  }
+
+  const targetHeaderMap = buildHeaderMap_(targetHeader);
+  const columnMappings = sourceHeader.reduce((acc, name, index) => {
+    const key = normalizeString_(name);
+    if (!key) return acc;
+    if (!Object.prototype.hasOwnProperty.call(targetHeaderMap, key)) return acc;
+    acc.push({
+      sourceIndex: index,
+      targetColumn: targetHeaderMap[key] + 1
+    });
+    return acc;
+  }, []);
+
+  if (!columnMappings.length) return;
+
+  const requiredRows = rows.length + 1;
+  ensureCapacity_(sheet, requiredRows, sheet.getMaxColumns());
+
+  const maxRows = sheet.getMaxRows();
+  columnMappings.forEach(({ targetColumn }) => {
+    if (maxRows > 1) {
+      sheet.getRange(2, targetColumn, maxRows - 1, 1).clearContent();
+    }
+  });
+
+  if (!rows.length) return;
+
+  columnMappings.forEach(({ sourceIndex, targetColumn }) => {
+    const columnValues = rows.map(row => {
+      const value = row[sourceIndex];
+      return [value === undefined ? '' : value];
+    });
+    sheet.getRange(2, targetColumn, columnValues.length, 1).setValues(columnValues);
+  });
+}
+
 function ensureCapacity_(sheet, requiredRows, requiredColumns) {
   const currentMaxRows = sheet.getMaxRows();
   if (currentMaxRows < requiredRows) {
@@ -231,4 +309,19 @@ function normalizeString_(value) {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string') return value.trim();
   return String(value).trim();
+}
+
+function buildHeaderMap_(header) {
+  const map = Object.create(null);
+  if (!Array.isArray(header)) return map;
+
+  header.forEach((name, index) => {
+    const key = normalizeString_(name);
+    if (!key) return;
+    if (!Object.prototype.hasOwnProperty.call(map, key)) {
+      map[key] = index;
+    }
+  });
+
+  return map;
 }

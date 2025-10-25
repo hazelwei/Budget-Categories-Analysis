@@ -38,8 +38,9 @@ function consolidateGroupAllocations() {
 
     if (!header) header = dataset.header;
 
+    const headerMap = buildHeaderMap_(dataset.header);
     const effectiveRows = dataset.rows
-      .filter(row => rowMatchesFilters_(row, filters))
+      .filter(row => rowMatchesFilters_(row, filters, headerMap))
       .filter(hasGroupAllocationContent_);
 
     aggregatedRows.push(...effectiveRows);

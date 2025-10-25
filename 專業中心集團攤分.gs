@@ -54,7 +54,6 @@ function distributeGroupAllocations() {
   const TARGET_SHEET_NAME = '集團攤分';
 
   const BASE_FILTER = {
-    '事業單位': 'Corporation',
     'Si 編號': 'Corporation',
     'TA 編號': 'Corporation',
   };
@@ -97,6 +96,7 @@ function distributeGroupAllocations() {
 
   const reservedHeaders = new Set(Object.keys(BASE_FILTER));
   reservedHeaders.add('子公司');
+  reservedHeaders.add('事業單位');
   ['價值鏈專案預算代號', '費用單位', '費用類型', '費用項目'].forEach(function (key) {
     reservedHeaders.add(key);
   });
@@ -110,6 +110,10 @@ function distributeGroupAllocations() {
     '非人事費用': new Map(),
     '人事費用': new Map(),
   };
+  const directQlrOmoTotals = {
+    '非人事費用': new Map(),
+    '人事費用': new Map(),
+  };
 
   const filteredRows = sourceValues.slice(1).filter(function (row) {
     if (!matchesCriteria_(row, sourceHeaderMap, BASE_FILTER)) {
@@ -120,6 +124,10 @@ function distributeGroupAllocations() {
       return false;
     }
     const subsidiary = normalizeString_(row[sourceHeaderMap['子公司']]);
+    const businessUnit = normalizeString_(row[sourceHeaderMap['事業單位']]);
+    if (!isAllowedCorporationBusinessUnit_(subsidiary, businessUnit)) {
+      return false;
+    }
     if (!GROUP_ALLOCATION_ALLOWED_SUBSIDIARIES_.has(subsidiary)) {
       return false;
     }
@@ -132,11 +140,42 @@ function distributeGroupAllocations() {
     if (!(costType in costTypeBuckets)) {
       return false;
     }
+    if (subsidiary === 'QLR' && businessUnit === 'OMO') {
+      accumulateMonthlyTotals_(directQlrOmoTotals[costType], unitKey, monthColumns, row);
+      return false;
+    }
     accumulateMonthlyTotals_(costTypeBuckets[costType], unitKey, monthColumns, row);
     return true;
   });
 
-  if (filteredRows.length === 0) {
+  sourceValues.slice(1).forEach(function (row) {
+    if (matchesCriteria_(row, sourceHeaderMap, BASE_FILTER)) {
+      return;
+    }
+    const projectCode = normalizeString_(row[sourceHeaderMap['價值鏈專案預算代號']]).toUpperCase();
+    if (!VALID_PROJECT_CODES.has(projectCode)) {
+      return;
+    }
+    const subsidiary = normalizeString_(row[sourceHeaderMap['子公司']]);
+    const businessUnit = normalizeString_(row[sourceHeaderMap['事業單位']]);
+    if (subsidiary !== 'QLR' || businessUnit !== 'OMO') {
+      return;
+    }
+    const rawUnit = normalizeString_(row[sourceHeaderMap['費用單位']]);
+    const unitKey = normalizeUnitKey_(rawUnit);
+    if (!VALID_UNITS.has(unitKey)) {
+      return;
+    }
+    const costType = normalizeString_(row[sourceHeaderMap['費用類型']]);
+    if (!(costType in directQlrOmoTotals)) {
+      return;
+    }
+    accumulateMonthlyTotals_(directQlrOmoTotals[costType], unitKey, monthColumns, row);
+  });
+
+  const hasDirectQlrOmoData = hasTotalsInCostTypeMap_(directQlrOmoTotals);
+
+  if (filteredRows.length === 0 && !hasDirectQlrOmoData) {
     Logger.log('沒有符合條件的來源資料。');
     removeExistingAllocations_(targetSheet, {
       'Si 編號': 'Corporation',
@@ -237,6 +276,46 @@ function distributeGroupAllocations() {
           outputRows.push(row);
         }
       });
+    });
+  });
+
+  Object.keys(directQlrOmoTotals).forEach(function (costType) {
+    const unitMap = directQlrOmoTotals[costType];
+    unitMap.forEach(function (monthlyTotals, unitKey) {
+      if (!hasNonZero_(monthlyTotals)) {
+        return;
+      }
+      const row = new Array(targetHeaders.length).fill('');
+      row[targetHeaderMap['子公司']] = 'QLR';
+      row[targetHeaderMap['事業單位']] = 'OMO';
+      row[targetHeaderMap['Si 編號']] = 'Corporation';
+      row[targetHeaderMap['TA 編號']] = 'Corporation';
+      if ('價值鏈專案預算代號' in targetHeaderMap) {
+        row[targetHeaderMap['價值鏈專案預算代號']] = 'NA';
+      }
+      if ('費用單位' in targetHeaderMap) {
+        row[targetHeaderMap['費用單位']] = getGroupAllocationUnitDisplay_(unitKey);
+      }
+      if ('費用類型' in targetHeaderMap) {
+        row[targetHeaderMap['費用類型']] = costType;
+      }
+      if ('費用項目' in targetHeaderMap) {
+        row[targetHeaderMap['費用項目']] = '集團費用分攤';
+      }
+      var hasRowData = false;
+      monthColumns.forEach(function (monthCol, index) {
+        if (!(monthCol.header in targetHeaderMap)) {
+          return;
+        }
+        var value = roundAmount_(monthlyTotals[index]);
+        if (Math.abs(value) > 0) {
+          hasRowData = true;
+        }
+        row[targetHeaderMap[monthCol.header]] = value;
+      });
+      if (hasRowData) {
+        outputRows.push(row);
+      }
     });
   });
 
@@ -346,6 +425,9 @@ function collectDirectPersonnelTotals_(rows, headerMap, monthColumns) {
     if (!businessUnit) {
       return;
     }
+    if (subsidiary === 'QLR' && businessUnit === 'OMO') {
+      return;
+    }
     var unitKey = normalizeUnitKey_(normalizeString_(row[headerMap['費用單位']]));
     if (!unitKey) {
       return;
@@ -364,6 +446,32 @@ function normalizeBusinessUnitForDirectPersonnel_(subsidiary, businessUnit) {
     return 'OMO';
   }
   return '';
+}
+
+function isAllowedCorporationBusinessUnit_(subsidiary, businessUnit) {
+  if (!subsidiary || !businessUnit) {
+    return false;
+  }
+  if (businessUnit === 'Corporation') {
+    return GROUP_ALLOCATION_ALLOWED_SUBSIDIARIES_.has(subsidiary);
+  }
+  if (subsidiary === 'QLR' && businessUnit === 'OMO') {
+    return true;
+  }
+  return false;
+}
+
+function hasTotalsInCostTypeMap_(totalsMapByCostType) {
+  return Object.keys(totalsMapByCostType).some(function (costType) {
+    var map = totalsMapByCostType[costType];
+    var found = false;
+    map.forEach(function (totals) {
+      if (!found && hasNonZero_(totals)) {
+        found = true;
+      }
+    });
+    return found;
+  });
 }
 
 function buildHeaderMap_(headers) {
