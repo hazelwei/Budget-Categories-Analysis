@@ -93,11 +93,21 @@ function syncTaResourceSheets() {
     const dataset = loadSourceDataset_(spreadsheetId, SOURCE_SHEET_NAME);
     if (!dataset.header.length) return;
 
-    if (!header) header = dataset.header;
+    if (!header) {
+      header = dataset.header.slice();
+    } else if (dataset.header.length > header.length) {
+      const headerGrowth = dataset.header.slice(header.length);
+      header.push(...headerGrowth);
+      aggregatedRows.forEach(row => {
+        while (row.length < header.length) row.push('');
+      });
+    }
 
     const headerMap = buildHeaderMap_(dataset.header);
     const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters, headerMap));
-    aggregatedRows.push(...matchedRows);
+    matchedRows.forEach(row => {
+      aggregatedRows.push(normalizeRowLength_(row, header.length));
+    });
   });
 
   if (!header || !header.length) {
@@ -324,4 +334,12 @@ function buildHeaderMap_(header) {
   });
 
   return map;
+}
+
+function normalizeRowLength_(row, targetLength) {
+  const normalized = row.slice(0, targetLength);
+  while (normalized.length < targetLength) {
+    normalized.push('');
+  }
+  return normalized;
 }
