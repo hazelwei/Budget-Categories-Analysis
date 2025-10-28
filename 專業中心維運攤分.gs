@@ -88,10 +88,10 @@ function distributeMaintenanceCosts() {
   ];
 
   const COST_UNIT_MAPPING = {
-    '執行長室 : 管理中心': '執行長室 : 管理中心 : 管理中心',
+    '執行長室 : 管理中心': '執行長室 : 管理中心 : 管理中心 : 資訊部',
     '執行長室 : 財務中心': '執行長室 : 財務中心 : 財務中心',
     '執行長室 : 研發中心': '執行長室 : 研發中心 : 研發中心',
-    '執行長室 : 行銷營運中心': '執行長室 : 行銷營運中心 : 行銷營運中心',
+    '執行長室 : 行銷營運中心': '執行長室 : 行銷營運中心 : 行銷營運中心 : 客戶導入團隊',
     '執行長室 : 客戶價值中心': '執行長室 : 客戶價值中心 : 客戶價值中心',
     '執行長室 : 策略資料中心': '執行長室 : 策略資料中心 : 策略資料中心',
   };
@@ -374,7 +374,17 @@ function matchesCriteria_(row, headerMap, criteria) {
       throw new Error('來源表頭缺少欄位：' + key);
     }
     const value = normalizeString_(row[headerMap[key]]);
-    return value === normalizeString_(criteria[key]);
+    const expected = normalizeString_(criteria[key]);
+    if (key === '價值鏈專案預算代號' && expected.toUpperCase() === 'NA') {
+      if (value === '') {
+        return true;
+      }
+      const valueUpper = value.toUpperCase();
+      if (valueUpper === 'NA' || valueUpper === 'N/A') {
+        return true;
+      }
+    }
+    return value === expected;
   });
 }
 
@@ -550,7 +560,18 @@ function rowMatches_(row, headerMap, fields) {
     if (!(key in headerMap)) {
       return false;
     }
-    return normalizeString_(row[headerMap[key]]) === normalizeString_(fields[key]);
+    const value = normalizeString_(row[headerMap[key]]);
+    const expected = normalizeString_(fields[key]);
+    if (key === '價值鏈專案預算代號' && expected.toUpperCase() === 'NA') {
+      if (value === '') {
+        return true;
+      }
+      const valueUpper = value.toUpperCase();
+      if (valueUpper === 'NA' || valueUpper === 'N/A') {
+        return true;
+      }
+    }
+    return value === expected;
   });
 }
 
