@@ -11,8 +11,12 @@ const PERSONNEL_COST_BACKFILL_SOURCE_SHEETS = {
 
 const PERSONNEL_COST_BACKFILL_SHEET_PAIRS = [
   {
-    referenceSheetName: '1.1_各事業 TA 預算規劃_人力時間配置',
-    targetSheetName: '1.2_各事業 TA 預算規劃_$',
+    referenceSheetName: '1.1_POS 事業 TA 預算規劃_人力時間配置',
+    targetSheetName: '1.2_POS 事業 TA 預算規劃_$',
+  },
+  {
+    referenceSheetName: '1.1_OMO 事業 TA 預算規劃_人力時間配置',
+    targetSheetName: '1.2_OMO 事業 TA 預算規劃_$',
   },
   {
     referenceSheetName: '2.1_事業維運費用_人力時間配置',
