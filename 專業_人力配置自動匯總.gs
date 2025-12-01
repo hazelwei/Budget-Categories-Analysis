@@ -16,7 +16,8 @@ function onInstall() {
 
 function consolidateHeadcount() {
   const sourceSheetNames = [
-    '1.1_各事業 TA 預算規劃_人力時間配置',
+    '1.1_POS 事業 TA 預算規劃_人力時間配置',
+    '1.1_OMO 事業 TA 預算規劃_人力時間配置',
     '2.1_事業維運費用_人力時間配置',
     '3.1_集團共用資源_人力時間配置'
   ];
