@@ -11,21 +11,25 @@ function consolidateHeadcount() {
 }
 
 function consolidateAllResources() {
-  const SOURCE_SHEET_PATTERN = '1.2_各事業 TA 預算規劃_$';
+  const SOURCE_SHEET_PATTERNS = [
+    '1.2_OMO 事業 TA 預算規劃_$',
+    '1.2_POS 事業 TA 預算規劃_$',
+    '1.2_各事業 TA 預算規劃_$',
+  ];
   const TARGET_SHEET_NAME = '2.6_TA 專案所需資源（匯總）';
 
   const SOURCE_SPREADSHEET_IDS = [
-    '10jcSlS4RvuGm1DK4KnyKz0YBVxHE_2OCnrBgAgqui9U', // QLR 2026 管理中心預算表
-    '1X6c37n6s4XQumB4mD-N_M_Pqv4ao9f9S7Zea6c6TXRI', // QLR 2026 研發中心預算表
-    '1-jof2z4-D2KbMRq2F7h0BW_p7cQy95Ppb-R1k9b6oeQ', // QLR 2026 行銷營運中心預算表
-    '17a5CYVYBiJgD85EYyV4GGFW4Z8DBbc0mfNcGCyAeml4', // iCHEF 2026 管理中心預算表
-    '1GPAPW3ZM3lY1Qmpb9LocnB27XWJ8AGybGhMNAy2KH0c', // iCHEF 2026 財務中心預算表
-    '1mYeC6DpUqFvnce9leb-098wSYCGqfOR5_HGDM2bcbEc', // iCHEF 2026 客戶價值中心預算表
-    '1Pt2ru3sBxa8TpMfTsfQLjJqdTzZZk0AYpAJvc9TjFY8', // iCHEF 2026 行銷營運中心預算表
-    '1ALyHp6xEMt8xt3T9zpEA52ZUzaDPy-QT-rRh6gU75_g', // iCHEF 2026 研發中心預算表
-    '1Y1KcaypEZGn_EePnDRYgj12mNw9yEvin7AZRsPhL_7E', // iCHEF 2026 策略資料中心預算表
-    '1Nk_TXUKf5uX0P-fmbP9jlSio6qB1pH1V4XFFsUWWIzM', // iCHEF 2026 執行長室預算表
-    '1XCORsakXwHErz2AxHTTBY1a1yxsN78scGKOd7_uIPss', // iCHEF 2026 執行長 OMO 預算表
+    '12BU3nBt1IpaZgUfjdrFNZNSZC_-pVmecPUpRfEGxbbQ', // QLR 2026 管理中心預算表
+    '1NhKn3g2rFnZrGK1kA8xHMdP_jmY89KozE5p71pvmbiQ', // QLR 2026 研發中心預算表
+    '16aQCJ9h-BGOG5rNPmdipcTu9HwIOjHyg3ooliet-6Hk', // QLR 2026 行銷營運中心預算表
+    '1_Eg-IxnBzR9aCF1009XnahAnWDhXpFs4l3fJ9pUfMdc', // iCHEF 2026 管理中心預算表
+    '1KcN_IqzUgKt6CcA_MySaCJe3v7ynJohaTjXuMgHKOA4', // iCHEF 2026 財務中心預算表
+    '1UsnCGSkL87CO-0cRMNeoGMFf_2jxcYrrikgqFs9tcwM', // iCHEF 2026 客戶價值中心預算表
+    '1IQDOWN6WKdYKzeQ_-Cx148p57JDd9JwV6zTOQfQq2Ac', // iCHEF 2026 行銷營運中心預算表
+    '1kNbslmkEl85l2PaEX1C086TX-RpNK7Sw8Kc3SeDJzkc', // iCHEF 2026 研發中心預算表
+    '1-uBunBfUMJCv9-v-Z19rLmo8V_RO0RuHe_3pAwcE4rA', // iCHEF 2026 策略資料中心預算表
+    '1eewZUOujnTnb71YeG52kWPHvDDuAp8jA5lWHr1OmmTc', // iCHEF 2026 執行長室預算表
+    '1vqMH_UUtjXahCbaOhrcdiVaYIgmEgNONRavS3J3dNaQ', // iCHEF 2026 執行長 OMO 預算表
   ];
 
   const filters = {
@@ -41,14 +45,20 @@ function consolidateAllResources() {
   const aggregatedRows = [];
 
   SOURCE_SPREADSHEET_IDS.forEach(spreadsheetId => {
-    const dataset = loadDatasetBySheetPattern_(spreadsheetId, SOURCE_SHEET_PATTERN);
-    if (!dataset.header || !dataset.header.length) return;
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    SOURCE_SHEET_PATTERNS.forEach(pattern => {
+      const sheet = findSheetByPattern_(ss, pattern);
+      if (!sheet) return;
 
-    if (!header || !header.length) header = dataset.header;
+      const dataset = readSheetDataset_(sheet);
+      if (!dataset.header || !dataset.header.length) return;
 
-    const headerMap = buildHeaderMap_(dataset.header);
-    const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters, headerMap));
-    aggregatedRows.push(...matchedRows);
+      if (!header || !header.length) header = dataset.header;
+
+      const headerMap = buildHeaderMap_(dataset.header);
+      const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters, headerMap));
+      aggregatedRows.push(...matchedRows);
+    });
   });
 
   if (!header || !header.length) {
@@ -64,17 +74,17 @@ function syncTaResourceSheets() {
   const TARGET_SHEET_NAME = '2.5_TA 專案所需資源（人力）';
 
   const SOURCE_SPREADSHEET_IDS = [
-    '10jcSlS4RvuGm1DK4KnyKz0YBVxHE_2OCnrBgAgqui9U', // QLR 2026 管理中心預算表
-    '1X6c37n6s4XQumB4mD-N_M_Pqv4ao9f9S7Zea6c6TXRI', // QLR 2026 研發中心預算表
-    '1-jof2z4-D2KbMRq2F7h0BW_p7cQy95Ppb-R1k9b6oeQ', // QLR 2026 行銷營運中心預算表
-    '17a5CYVYBiJgD85EYyV4GGFW4Z8DBbc0mfNcGCyAeml4', // iCHEF 2026 管理中心預算表
-    '1GPAPW3ZM3lY1Qmpb9LocnB27XWJ8AGybGhMNAy2KH0c', // iCHEF 2026 財務中心預算表
-    '1mYeC6DpUqFvnce9leb-098wSYCGqfOR5_HGDM2bcbEc', // iCHEF 2026 客戶價值中心預算表
-    '1Pt2ru3sBxa8TpMfTsfQLjJqdTzZZk0AYpAJvc9TjFY8', // iCHEF 2026 行銷營運中心預算表
-    '1ALyHp6xEMt8xt3T9zpEA52ZUzaDPy-QT-rRh6gU75_g', // iCHEF 2026 研發中心預算表
-    '1Y1KcaypEZGn_EePnDRYgj12mNw9yEvin7AZRsPhL_7E', // iCHEF 2026 策略資料中心預算表
-    '1Nk_TXUKf5uX0P-fmbP9jlSio6qB1pH1V4XFFsUWWIzM', // iCHEF 2026 執行長室預算表
-    '1XCORsakXwHErz2AxHTTBY1a1yxsN78scGKOd7_uIPss', // iCHEF 2026 執行長 OMO 預算表
+    '12BU3nBt1IpaZgUfjdrFNZNSZC_-pVmecPUpRfEGxbbQ', // QLR 2026 管理中心預算表
+    '1NhKn3g2rFnZrGK1kA8xHMdP_jmY89KozE5p71pvmbiQ', // QLR 2026 研發中心預算表
+    '16aQCJ9h-BGOG5rNPmdipcTu9HwIOjHyg3ooliet-6Hk', // QLR 2026 行銷營運中心預算表
+    '1_Eg-IxnBzR9aCF1009XnahAnWDhXpFs4l3fJ9pUfMdc', // iCHEF 2026 管理中心預算表
+    '1KcN_IqzUgKt6CcA_MySaCJe3v7ynJohaTjXuMgHKOA4', // iCHEF 2026 財務中心預算表
+    '1UsnCGSkL87CO-0cRMNeoGMFf_2jxcYrrikgqFs9tcwM', // iCHEF 2026 客戶價值中心預算表
+    '1IQDOWN6WKdYKzeQ_-Cx148p57JDd9JwV6zTOQfQq2Ac', // iCHEF 2026 行銷營運中心預算表
+    '1kNbslmkEl85l2PaEX1C086TX-RpNK7Sw8Kc3SeDJzkc', // iCHEF 2026 研發中心預算表
+    '1-uBunBfUMJCv9-v-Z19rLmo8V_RO0RuHe_3pAwcE4rA', // iCHEF 2026 策略資料中心預算表
+    '1eewZUOujnTnb71YeG52kWPHvDDuAp8jA5lWHr1OmmTc', // iCHEF 2026 執行長室預算表
+    '1vqMH_UUtjXahCbaOhrcdiVaYIgmEgNONRavS3J3dNaQ', // iCHEF 2026 執行長 OMO 預算表
   ];
 
   const filters = {
