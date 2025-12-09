@@ -61,11 +61,10 @@ function consolidateHeadcount() {
     if (lastRow <= 1) return;
     const rows = sheet.getRange(2, 1, lastRow - 1, effectiveLastCol).getValues();
     rows.forEach(row => {
-      const hasNumbers = row.slice(metricsStartIndex)
-        .some(value => typeof value === 'number' && !isNaN(value) && value !== 0);
       const hasKeys = row.slice(0, metricsStartIndex)
         .some(value => value !== '' && value !== null);
-      if (hasNumbers && hasKeys) summaryRows.push(row);
+      // 保留有鍵值的列，即使數值全為 0
+      if (hasKeys) summaryRows.push(row);
     });
   });
 
