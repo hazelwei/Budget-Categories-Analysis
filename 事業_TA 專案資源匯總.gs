@@ -103,21 +103,11 @@ function syncTaResourceSheets() {
     const dataset = loadSourceDataset_(spreadsheetId, SOURCE_SHEET_NAME);
     if (!dataset.header.length) return;
 
-    if (!header) {
-      header = dataset.header.slice();
-    } else if (dataset.header.length > header.length) {
-      const headerGrowth = dataset.header.slice(header.length);
-      header.push(...headerGrowth);
-      aggregatedRows.forEach(row => {
-        while (row.length < header.length) row.push('');
-      });
-    }
+    if (!header) header = dataset.header;
 
     const headerMap = buildHeaderMap_(dataset.header);
     const matchedRows = dataset.rows.filter(row => rowMatchesFilters_(row, filters, headerMap));
-    matchedRows.forEach(row => {
-      aggregatedRows.push(normalizeRowLength_(row, header.length));
-    });
+    aggregatedRows.push(...matchedRows);
   });
 
   if (!header || !header.length) {
