@@ -1,0 +1,10 @@
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('費用匯總')
+    .addItem('各部費用清單匯總', 'runFinalSummaryExport')
+    .addToUi();
+}
+
+function runFinalSummaryExport() {
+  BudgetExpenseLibrary.runFinalSummaryExport();
+}

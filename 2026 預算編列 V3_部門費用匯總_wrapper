@@ -1,0 +1,15 @@
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('費用匯總')
+    .addItem('人事費用回填', 'runPersonnelExpenseFill')
+    .addItem('所有費用匯總', 'runAllExpenseSummary')
+    .addToUi();
+}
+
+function runPersonnelExpenseFill() {
+  BudgetExpenseLibrary.runPersonnelExpenseFill();
+}
+
+function runAllExpenseSummary() {
+  BudgetExpenseLibrary.runAllExpenseSummary();
+}

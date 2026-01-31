@@ -1,0 +1,316 @@
+const CONTROL_SPREADSHEET_ID = '1lvnZTHLTh8eA4f7VoVwSj2bZ-y8tOYDw-KYmylJvZP0';
+const MAPPING_SHEET_NAME = '部門人事費用 Mapping 表';
+
+const PERSONNEL_SETTING_SHEET_NAME = '人事費用來源設定';
+const PERSONNEL_SOURCE_ID_COLUMN = '人事費用 Spreadsheet ID';
+const PERSONNEL_SOURCE_SHEET_COLUMN = '來源分頁名稱';
+const SOURCE_PERSONNEL_UNIT_COLUMN = '費用單位';
+
+const TARGET_PERSONNEL_SHEET_NAME = '1.1_部門人事預算_會科';
+const SOURCE_NON_PERSONNEL_SHEET_NAME = '0.2_部門非人事預算';
+const TARGET_SUMMARY_SHEET_NAME = '1.2_部門預算匯總_會科';
+const FINAL_SUMMARY_SPREADSHEET_ID = '1Vj6zhZ_mmalw3YX5ncpiETkvdMnoT21Yzbp4-YqTJTU';
+const FINAL_SUMMARY_SHEET_NAME = '各部費用清單';
+
+function runPersonnelExpenseFill() {
+  fillPersonnelExpenseByMapping_();
+}
+
+function runAllExpenseSummary() {
+  fillPersonnelExpenseByMapping_();
+  consolidateAllExpenses_();
+}
+
+function runFinalSummaryExport() {
+  consolidateFinalSummary_();
+}
+
+function fillPersonnelExpenseByMapping_() {
+  const sourceSetting = loadPersonnelSourceSetting_();
+  const sourceSpreadsheet = SpreadsheetApp.openById(sourceSetting.spreadsheetId);
+  const sourceSheet = sourceSpreadsheet.getSheetByName(sourceSetting.sheetName);
+  if (!sourceSheet) {
+    throw new Error(`找不到來源分頁：${sourceSetting.sheetName}`);
+  }
+
+  const dataset = readSheetDataset_(sourceSheet);
+  if (!dataset.header.length) {
+    throw new Error(`來源分頁缺少標題列：${sourceSetting.sheetName}`);
+  }
+
+  const headerMap = buildHeaderMap_(dataset.header);
+  const unitIndex = headerMap[normalizeString_(SOURCE_PERSONNEL_UNIT_COLUMN)];
+  if (typeof unitIndex !== 'number') {
+    throw new Error(`找不到欄位：${SOURCE_PERSONNEL_UNIT_COLUMN}`);
+  }
+
+  const mappingRows = loadMappingRows_();
+  const mappingByUnit = buildMappingByUnit_(mappingRows);
+  const rowsByTarget = groupRowsByTarget_(dataset.rows, unitIndex, mappingByUnit);
+
+  rowsByTarget.forEach((rows, targetKey) => {
+    const [spreadsheetId, sheetName] = targetKey.split('|');
+    writeRowsAlignedToTarget_(spreadsheetId, sheetName, dataset.header, rows);
+  });
+}
+
+function consolidateAllExpenses_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const personnelSheet = ss.getSheetByName(TARGET_PERSONNEL_SHEET_NAME);
+  const nonPersonnelSheet = ss.getSheetByName(SOURCE_NON_PERSONNEL_SHEET_NAME);
+  const targetSheet = ss.getSheetByName(TARGET_SUMMARY_SHEET_NAME);
+
+  if (!personnelSheet) {
+    throw new Error(`找不到來源分頁：${TARGET_PERSONNEL_SHEET_NAME}`);
+  }
+  if (!nonPersonnelSheet) {
+    throw new Error(`找不到來源分頁：${SOURCE_NON_PERSONNEL_SHEET_NAME}`);
+  }
+  if (!targetSheet) {
+    throw new Error(`找不到目標分頁：${TARGET_SUMMARY_SHEET_NAME}`);
+  }
+
+  const personnelDataset = readSheetDataset_(personnelSheet);
+  const nonPersonnelDataset = readSheetDataset_(nonPersonnelSheet);
+  const combinedHeader = personnelDataset.header.length
+    ? personnelDataset.header
+    : nonPersonnelDataset.header;
+
+  if (!combinedHeader.length) {
+    throw new Error('來源分頁缺少標題列');
+  }
+
+  const combinedRows = [];
+  combinedRows.push(...personnelDataset.rows);
+  combinedRows.push(...nonPersonnelDataset.rows);
+
+  writeRowsAlignedToTarget_(ss.getId(), TARGET_SUMMARY_SHEET_NAME, combinedHeader, combinedRows);
+}
+
+function consolidateFinalSummary_() {
+  const mappingRows = loadMappingRows_();
+  const destinationIds = extractDestinationIds_(mappingRows);
+  if (!destinationIds.length) {
+    throw new Error('Mapping 分頁缺少目的地 Spreadsheet ID');
+  }
+
+  let header = null;
+  const aggregatedRows = [];
+
+  destinationIds.forEach(spreadsheetId => {
+    const dataset = loadSourceDataset_(spreadsheetId, TARGET_SUMMARY_SHEET_NAME);
+    if (!dataset.header.length) return;
+
+    if (!header || !header.length) header = dataset.header;
+    aggregatedRows.push(...dataset.rows);
+  });
+
+  if (!header || !header.length) {
+    throw new Error('來源分頁缺少標題列');
+  }
+
+  writeRowsAlignedToTarget_(FINAL_SUMMARY_SPREADSHEET_ID, FINAL_SUMMARY_SHEET_NAME, header, aggregatedRows);
+}
+
+function loadMappingRows_() {
+  const mappingSpreadsheet = SpreadsheetApp.openById(CONTROL_SPREADSHEET_ID);
+  const mappingSheet = mappingSpreadsheet.getSheetByName(MAPPING_SHEET_NAME);
+  if (!mappingSheet) {
+    throw new Error(`找不到 Mapping 分頁：${MAPPING_SHEET_NAME}`);
+  }
+
+  const dataset = readSheetDataset_(mappingSheet);
+  if (!dataset.header.length) {
+    throw new Error(`Mapping 分頁缺少標題列：${MAPPING_SHEET_NAME}`);
+  }
+
+  return dataset;
+}
+
+function extractDestinationIds_(dataset) {
+  const headerMap = buildHeaderMap_(dataset.header);
+  const targetIdIndex = headerMap[normalizeString_('目的地 Spreadsheet ID')];
+  if (targetIdIndex === undefined) return [];
+
+  const ids = new Set();
+  dataset.rows.forEach(row => {
+    const spreadsheetId = normalizeString_(row[targetIdIndex]);
+    if (spreadsheetId) ids.add(spreadsheetId);
+  });
+
+  return Array.from(ids);
+}
+
+function loadSourceDataset_(spreadsheetId, sheetName) {
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`找不到來源分頁：${sheetName}`);
+
+  const dataset = readSheetDataset_(sheet);
+  if (!dataset.header.length) {
+    throw new Error(`來源分頁缺少標題列：${sheetName}`);
+  }
+  return dataset;
+}
+
+function loadPersonnelSourceSetting_() {
+  const mappingSpreadsheet = SpreadsheetApp.openById(CONTROL_SPREADSHEET_ID);
+  const settingSheet = mappingSpreadsheet.getSheetByName(PERSONNEL_SETTING_SHEET_NAME);
+  if (!settingSheet) {
+    throw new Error(`找不到設定分頁：${PERSONNEL_SETTING_SHEET_NAME}`);
+  }
+
+  const dataset = readSheetDataset_(settingSheet);
+  if (!dataset.header.length || !dataset.rows.length) {
+    throw new Error(`設定分頁缺少資料：${PERSONNEL_SETTING_SHEET_NAME}`);
+  }
+
+  const headerMap = buildHeaderMap_(dataset.header);
+  const idIndex = headerMap[normalizeString_(PERSONNEL_SOURCE_ID_COLUMN)];
+  const sheetIndex = headerMap[normalizeString_(PERSONNEL_SOURCE_SHEET_COLUMN)];
+  if (idIndex === undefined || sheetIndex === undefined) {
+    throw new Error(`設定分頁缺少欄位：${PERSONNEL_SOURCE_ID_COLUMN} / ${PERSONNEL_SOURCE_SHEET_COLUMN}`);
+  }
+
+  const firstRow = dataset.rows[0] || [];
+  const spreadsheetId = normalizeString_(firstRow[idIndex]);
+  const sheetName = normalizeString_(firstRow[sheetIndex]);
+  if (!spreadsheetId || !sheetName) {
+    throw new Error('設定分頁的第一列資料不完整');
+  }
+
+  return { spreadsheetId, sheetName };
+}
+
+function buildMappingByUnit_(dataset) {
+  const headerMap = buildHeaderMap_(dataset.header);
+  const unitIndex = headerMap[normalizeString_('費用單位')];
+  const targetIdIndex = headerMap[normalizeString_('目的地 Spreadsheet ID')];
+  const targetSheetIndex = headerMap[normalizeString_('目的地分頁名稱')];
+
+  if (unitIndex === undefined || targetIdIndex === undefined || targetSheetIndex === undefined) {
+    throw new Error('Mapping 分頁缺少必要欄位：費用單位 / 目的地 Spreadsheet ID / 目的地分頁名稱');
+  }
+
+  const mapping = new Map();
+  dataset.rows.forEach(row => {
+    const unit = normalizeString_(row[unitIndex]);
+    const spreadsheetId = normalizeString_(row[targetIdIndex]);
+    const sheetName = normalizeString_(row[targetSheetIndex]);
+    if (!unit || !spreadsheetId || !sheetName) return;
+    mapping.set(unit, { spreadsheetId, sheetName });
+  });
+
+  return mapping;
+}
+
+function groupRowsByTarget_(rows, unitIndex, mappingByUnit) {
+  const grouped = new Map();
+
+  rows.forEach(row => {
+    const unit = normalizeString_(row[unitIndex]);
+    if (!unit || !mappingByUnit.has(unit)) return;
+    const mapping = mappingByUnit.get(unit);
+    const key = `${mapping.spreadsheetId}|${mapping.sheetName}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  });
+
+  return grouped;
+}
+
+function readSheetDataset_(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 1 || lastColumn < 1) return { header: [], rows: [] };
+
+  const header = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const rows = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues()
+    : [];
+
+  return { header, rows };
+}
+
+function writeRowsAlignedToTarget_(spreadsheetId, sheetName, sourceHeader, rows) {
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`找不到目標分頁：${sheetName}`);
+
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) {
+    throw new Error(`目標分頁缺少標題列：${sheetName}`);
+  }
+
+  const targetHeader = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  if (!targetHeader.length) {
+    throw new Error(`目標分頁缺少標題列：${sheetName}`);
+  }
+
+  const targetHeaderMap = buildHeaderMap_(targetHeader);
+  const columnMappings = sourceHeader.reduce((acc, name, index) => {
+    const key = normalizeString_(name);
+    if (!key) return acc;
+    if (!Object.prototype.hasOwnProperty.call(targetHeaderMap, key)) return acc;
+    acc.push({
+      sourceIndex: index,
+      targetColumn: targetHeaderMap[key] + 1
+    });
+    return acc;
+  }, []);
+
+  if (!columnMappings.length) return;
+
+  ensureCapacity_(sheet, rows.length + 1, sheet.getMaxColumns());
+  const maxRows = sheet.getMaxRows();
+  columnMappings.forEach(({ targetColumn }) => {
+    if (maxRows > 1) {
+      const targetRange = sheet.getRange(2, targetColumn, maxRows - 1, 1);
+      targetRange.clearDataValidations();
+      targetRange.clearContent();
+    }
+  });
+
+  if (!rows.length) return;
+
+  columnMappings.forEach(({ sourceIndex, targetColumn }) => {
+    const columnValues = rows.map(row => {
+      const value = row[sourceIndex];
+      return [value === undefined ? '' : value];
+    });
+    sheet.getRange(2, targetColumn, columnValues.length, 1).setValues(columnValues);
+  });
+}
+
+function ensureCapacity_(sheet, requiredRows, requiredColumns) {
+  const currentMaxRows = sheet.getMaxRows();
+  if (currentMaxRows < requiredRows) {
+    sheet.insertRowsAfter(currentMaxRows, requiredRows - currentMaxRows);
+  }
+
+  const currentMaxColumns = sheet.getMaxColumns();
+  if (currentMaxColumns < requiredColumns) {
+    sheet.insertColumnsAfter(currentMaxColumns, requiredColumns - currentMaxColumns);
+  }
+}
+
+function normalizeString_(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  return String(value).trim();
+}
+
+function buildHeaderMap_(header) {
+  const map = Object.create(null);
+  if (!Array.isArray(header)) return map;
+
+  header.forEach((name, index) => {
+    const key = normalizeString_(name);
+    if (!key) return;
+    if (!Object.prototype.hasOwnProperty.call(map, key)) {
+      map[key] = index;
+    }
+  });
+
+  return map;
+}
