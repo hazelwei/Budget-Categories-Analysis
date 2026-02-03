@@ -9,6 +9,8 @@ const SOURCE_PERSONNEL_UNIT_COLUMN = '費用單位';
 const TARGET_PERSONNEL_SHEET_NAME = '1.1_部門人事預算_會科';
 const SOURCE_NON_PERSONNEL_SHEET_NAME = '0.2_部門非人事預算';
 const TARGET_SUMMARY_SHEET_NAME = '1.2_部門預算匯總_會科';
+const SHARED_ALLOCATION_MAPPING_SHEET_NAME = '共用資源分攤 Mapping 表';
+const SHARED_ALLOCATION_SHEET_NAME = '1.3_共用攤分後匯總_會科';
 const FINAL_SUMMARY_SPREADSHEET_ID = '1Vj6zhZ_mmalw3YX5ncpiETkvdMnoT21Yzbp4-YqTJTU';
 const FINAL_SUMMARY_SHEET_NAME = '各部費用清單';
 
@@ -23,6 +25,10 @@ function runAllExpenseSummary() {
 
 function runFinalSummaryExport() {
   consolidateFinalSummary_();
+}
+
+function runSharedResourceAllocation() {
+  allocateSharedResources_();
 }
 
 function fillPersonnelExpenseByMapping_() {
@@ -112,6 +118,77 @@ function consolidateFinalSummary_() {
   writeRowsAlignedToTarget_(FINAL_SUMMARY_SPREADSHEET_ID, FINAL_SUMMARY_SHEET_NAME, header, aggregatedRows);
 }
 
+function allocateSharedResources_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceSheet = ss.getSheetByName(TARGET_SUMMARY_SHEET_NAME);
+  const targetSheet = ss.getSheetByName(SHARED_ALLOCATION_SHEET_NAME);
+
+  if (!sourceSheet) {
+    throw new Error(`找不到來源分頁：${TARGET_SUMMARY_SHEET_NAME}`);
+  }
+  if (!targetSheet) {
+    throw new Error(`找不到目標分頁：${SHARED_ALLOCATION_SHEET_NAME}`);
+  }
+
+  const sourceDataset = readSheetDataset_(sourceSheet);
+  if (!sourceDataset.header.length) {
+    throw new Error(`來源分頁缺少標題列：${TARGET_SUMMARY_SHEET_NAME}`);
+  }
+
+  const mappingDataset = loadSharedAllocationMapping_();
+  const allocationRules = buildSharedAllocationRules_(mappingDataset);
+
+  const headerMap = buildHeaderMap_(sourceDataset.header);
+  const departmentIndex = requireHeaderIndexCandidates_(headerMap, [
+    '費用單位',
+    '費用部門'
+  ]);
+  const productLineIndex = requireHeaderIndex_(headerMap, '產品線');
+  const taIndex = requireHeaderIndex_(headerMap, 'TA 編號');
+  const monthIndices = resolveMonthColumnIndices_(sourceDataset.header);
+  if (!monthIndices.length) {
+    throw new Error('找不到每月金額欄位，請確認 1.2 欄位名稱是否包含月份');
+  }
+  const yearTotalColumns = resolveYearTotalColumns_(sourceDataset.header);
+  const monthsByYear = buildMonthIndicesByYear_(sourceDataset.header, monthIndices);
+
+  const outputRows = [];
+
+  sourceDataset.rows.forEach(row => {
+    const key = buildAllocationKey_(
+      row[departmentIndex],
+      row[productLineIndex],
+      row[taIndex]
+    );
+
+    const rules = allocationRules.get(key);
+    if (!rules || !rules.length) {
+      const passthroughRow = row.slice();
+      applyYearTotals_(passthroughRow, monthIndices, monthsByYear, yearTotalColumns);
+      outputRows.push(passthroughRow);
+      return;
+    }
+
+    rules.forEach(rule => {
+      const newRow = row.slice();
+      newRow[departmentIndex] = rule.targetDepartment;
+      newRow[productLineIndex] = rule.targetProductLine;
+      newRow[taIndex] = rule.targetTa;
+
+      monthIndices.forEach(index => {
+        const value = Number(row[index]);
+        const baseValue = Number.isFinite(value) ? value : 0;
+        newRow[index] = baseValue * rule.ratio;
+      });
+
+      applyYearTotals_(newRow, monthIndices, monthsByYear, yearTotalColumns);
+      outputRows.push(newRow);
+    });
+  });
+
+  writeRowsAlignedToTarget_(ss.getId(), SHARED_ALLOCATION_SHEET_NAME, sourceDataset.header, outputRows);
+}
+
 function loadMappingRows_() {
   const mappingSpreadsheet = SpreadsheetApp.openById(CONTROL_SPREADSHEET_ID);
   const mappingSheet = mappingSpreadsheet.getSheetByName(MAPPING_SHEET_NAME);
@@ -122,6 +199,21 @@ function loadMappingRows_() {
   const dataset = readSheetDataset_(mappingSheet);
   if (!dataset.header.length) {
     throw new Error(`Mapping 分頁缺少標題列：${MAPPING_SHEET_NAME}`);
+  }
+
+  return dataset;
+}
+
+function loadSharedAllocationMapping_() {
+  const mappingSpreadsheet = SpreadsheetApp.openById(CONTROL_SPREADSHEET_ID);
+  const mappingSheet = mappingSpreadsheet.getSheetByName(SHARED_ALLOCATION_MAPPING_SHEET_NAME);
+  if (!mappingSheet) {
+    throw new Error(`找不到 Mapping 分頁：${SHARED_ALLOCATION_MAPPING_SHEET_NAME}`);
+  }
+
+  const dataset = readSheetDataset_(mappingSheet);
+  if (!dataset.header.length) {
+    throw new Error(`Mapping 分頁缺少標題列：${SHARED_ALLOCATION_MAPPING_SHEET_NAME}`);
   }
 
   return dataset;
@@ -141,6 +233,105 @@ function extractDestinationIds_(dataset) {
   return Array.from(ids);
 }
 
+function buildSharedAllocationRules_(dataset) {
+  const headerMap = buildHeaderMap_(dataset.header);
+  const sourceDepartmentIndex = resolveHeaderIndex_(headerMap, [
+    '來源費用單位',
+    '來源費用部門',
+    '費用單位',
+    '費用部門'
+  ]);
+  const sourceProductLineIndex = resolveHeaderIndex_(headerMap, [
+    '來源產品線',
+    '產品線'
+  ]);
+  const sourceTaIndex = resolveHeaderIndex_(headerMap, [
+    '來源TA 編號',
+    '來源 TA 編號',
+    'TA 編號'
+  ]);
+  const ratioIndex = resolveHeaderIndex_(headerMap, [
+    '金額拆分比例',
+    '拆分比例',
+    '分攤比例'
+  ]);
+  const targetDepartmentIndex = resolveHeaderIndex_(headerMap, [
+    '拆分後費用單位',
+    '拆分後費用部門',
+    '目標費用單位',
+    '目標費用部門',
+    '費用單位(拆分後)',
+    '費用部門(拆分後)',
+    '費用單位_拆分後',
+    '費用部門_拆分後'
+  ]);
+  const targetProductLineIndex = resolveHeaderIndex_(headerMap, [
+    '拆分後產品線',
+    '目標產品線',
+    '產品線(拆分後)',
+    '產品線_拆分後'
+  ]);
+  const targetTaIndex = resolveHeaderIndex_(headerMap, [
+    '拆分後 TA 編號',
+    '拆分後TA 編號',
+    '目標 TA 編號',
+    '目標TA 編號',
+    'TA 編號(拆分後)',
+    'TA 編號_拆分後'
+  ]);
+
+  if (
+    sourceDepartmentIndex === undefined ||
+    sourceProductLineIndex === undefined ||
+    sourceTaIndex === undefined ||
+    ratioIndex === undefined ||
+    targetDepartmentIndex === undefined ||
+    targetProductLineIndex === undefined ||
+    targetTaIndex === undefined
+  ) {
+    throw new Error('共用資源分攤 Mapping 表缺少必要欄位');
+  }
+
+  const mapping = new Map();
+  const ratioTotals = new Map();
+
+  dataset.rows.forEach(row => {
+    const sourceKey = buildAllocationKey_(
+      row[sourceDepartmentIndex],
+      row[sourceProductLineIndex],
+      row[sourceTaIndex]
+    );
+    if (!sourceKey) return;
+
+    const ratio = parseRatio_(row[ratioIndex]);
+    if (!Number.isFinite(ratio) || ratio <= 0) return;
+
+    const targetDepartment = normalizeString_(row[targetDepartmentIndex]);
+    const targetProductLine = normalizeString_(row[targetProductLineIndex]);
+    const targetTa = normalizeString_(row[targetTaIndex]);
+    if (!targetDepartment || !targetProductLine || !targetTa) return;
+
+    if (!mapping.has(sourceKey)) mapping.set(sourceKey, []);
+    mapping.get(sourceKey).push({
+      ratio,
+      targetDepartment,
+      targetProductLine,
+      targetTa
+    });
+
+    const total = (ratioTotals.get(sourceKey) || 0) + ratio;
+    ratioTotals.set(sourceKey, total);
+  });
+
+  ratioTotals.forEach((total, sourceKey) => {
+    if (Math.abs(total - 1) > 0.01) {
+      Logger.log(`共用資源分攤比例加總不等於 1：${sourceKey} = ${total}`);
+    }
+  });
+
+  return mapping;
+}
+
 function loadSourceDataset_(spreadsheetId, sheetName) {
   const ss = SpreadsheetApp.openById(spreadsheetId);
   const sheet = ss.getSheetByName(sheetName);
@@ -151,6 +342,129 @@ function loadSourceDataset_(spreadsheetId, sheetName) {
     throw new Error(`來源分頁缺少標題列：${sheetName}`);
   }
   return dataset;
+}
+
+function resolveMonthColumnIndices_(header) {
+  const indices = [];
+  header.forEach((name, index) => {
+    if (name instanceof Date) {
+      indices.push(index);
+      return;
+    }
+    const key = normalizeString_(name);
+    if (!key) return;
+    const compactKey = key.replace(/\s+/g, '');
+    if (
+      /^\d{4}\/\d{1,2}$/.test(key) ||
+      /^\d{4}\/\d{1,2}$/.test(compactKey) ||
+      /^\d{1,2}月$/.test(key) ||
+      /^\d{1,2}月金額$/.test(key) ||
+      /^\d{1,2}月/.test(key) ||
+      /^\d{1,2}月/.test(compactKey) ||
+      /^M\d{1,2}$/i.test(key) ||
+      /^Month\d{1,2}$/i.test(key) ||
+      /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)$/i.test(key) ||
+      /^(一|二|三|四|五|六|七|八|九|十|十一|十二)月$/.test(key) ||
+      /^(一|二|三|四|五|六|七|八|九|十|十一|十二)月/.test(compactKey)
+    ) {
+      indices.push(index);
+    }
+  });
+  return indices;
+}
+
+function resolveYearTotalColumns_(header) {
+  const columns = [];
+  header.forEach((name, index) => {
+    const key = normalizeString_(name);
+    if (!key) return;
+    const match = key.match(/^(\d{4})\s*(year|年度|年)$/i);
+    if (!match) return;
+    columns.push({ index, year: Number(match[1]) });
+  });
+  return columns;
+}
+
+function buildMonthIndicesByYear_(header, monthIndices) {
+  const map = new Map();
+  monthIndices.forEach(index => {
+    const value = header[index];
+    const year = extractYearFromMonthHeader_(value);
+    if (!year) return;
+    if (!map.has(year)) map.set(year, []);
+    map.get(year).push(index);
+  });
+  return map;
+}
+
+function extractYearFromMonthHeader_(value) {
+  if (value instanceof Date) {
+    return value.getFullYear();
+  }
+  const text = normalizeString_(value);
+  if (!text) return 0;
+  const compact = text.replace(/\s+/g, '');
+  const match = compact.match(/^(\d{4})[\/\-](\d{1,2})$/);
+  if (match) return Number(match[1]);
+  return 0;
+}
+
+function applyYearTotals_(row, monthIndices, monthsByYear, yearTotalColumns) {
+  if (!yearTotalColumns.length) return;
+  yearTotalColumns.forEach(({ index, year }) => {
+    const indices = monthsByYear.get(year) || monthIndices;
+    const total = indices.reduce((sum, monthIndex) => {
+      const value = Number(row[monthIndex]);
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    row[index] = total;
+  });
+}
+
+
+function buildAllocationKey_(department, productLine, taId) {
+  const deptKey = normalizeString_(department);
+  const plKey = normalizeString_(productLine);
+  const taKey = normalizeString_(taId);
+  if (!deptKey || !plKey || !taKey) return '';
+  return `${deptKey}|${plKey}|${taKey}`;
+}
+
+function parseRatio_(value) {
+  if (value === null || value === undefined || value === '') return NaN;
+  if (typeof value === 'number') return value;
+  const text = String(value).trim();
+  if (!text) return NaN;
+  if (text.endsWith('%')) {
+    const num = Number(text.replace('%', '').trim());
+    return Number.isFinite(num) ? num / 100 : NaN;
+  }
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function resolveHeaderIndex_(headerMap, candidates) {
+  for (const name of candidates) {
+    const index = headerMap[normalizeString_(name)];
+    if (index !== undefined) return index;
+  }
+  return undefined;
+}
+
+function requireHeaderIndex_(headerMap, name) {
+  const index = headerMap[normalizeString_(name)];
+  if (index === undefined) {
+    throw new Error(`找不到欄位：${name}`);
+  }
+  return index;
+}
+
+function requireHeaderIndexCandidates_(headerMap, candidates) {
+  for (const name of candidates) {
+    const index = headerMap[normalizeString_(name)];
+    if (index !== undefined) return index;
+  }
+  throw new Error(`找不到欄位：${candidates.join(' / ')}`);
 }
 
 function loadPersonnelSourceSetting_() {

@@ -3,6 +3,7 @@ function onOpen() {
     .createMenu('費用匯總')
     .addItem('人事費用回填', 'runPersonnelExpenseFill')
     .addItem('所有費用匯總', 'runAllExpenseSummary')
+    .addItem('共用資源分攤', 'runSharedResourceAllocation')
     .addToUi();
 }
 
@@ -12,4 +13,8 @@ function runPersonnelExpenseFill() {
 
 function runAllExpenseSummary() {
   BudgetExpenseLibrary.runAllExpenseSummary();
+}
+
+function runSharedResourceAllocation() {
+  BudgetExpenseLibrary.runSharedResourceAllocation();
 }
